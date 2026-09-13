@@ -1,0 +1,13 @@
+{{/*
+Renders no objects — it exists to fail the release early.
+
+NOTE: this file must NOT be named with a leading underscore. Helm treats
+_*.tpl as partials: it parses them but never executes their top-level content,
+so a `fail` in a partial silently never runs.
+
+The one constraint tags cannot express: llamacpp and vllm are alternative
+inference backends, not a pair (RFC-009 §1).
+*/}}
+{{- if and .Values.tags.llamacpp .Values.tags.vllm }}
+{{- fail "tags.llamacpp and tags.vllm are mutually exclusive inference backends — enable one, not both" }}
+{{- end }}

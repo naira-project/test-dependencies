@@ -1,0 +1,38 @@
+# Chart registry for the PoC. TLS with a self-signed cert whose CA is loaded
+# into argocd-tls-certs-cm (see poc/certs and deploy/poc/up.sh).
+#
+# Why TLS at all for a throwaway registry: ArgoCD 3.5.2 did not honour
+# insecureOCIForceHttp against a plain-HTTP OCI registry — every pull went out
+# as https regardless of repository type, secret type or URL form.
+#
+# One secret PER CHART with the URL matching the Application's repoURL exactly.
+# repo-creds prefix matching did not apply `insecure` here; exact-match
+# repository entries do. Against ghcr this is one `type: helm` entry with
+# credentials and real TLS.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: naira-poc-chart-naira
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  type: helm
+  name: naira-poc-chart-naira
+  url: oci://naira-poc-registry-tls:5000/charts/naira
+  enableOCI: "true"
+  insecure: "true"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: naira-poc-chart-deps
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  type: helm
+  name: naira-poc-chart-deps
+  url: oci://naira-poc-registry-tls:5000/charts/naira-dependencies
+  enableOCI: "true"
+  insecure: "true"

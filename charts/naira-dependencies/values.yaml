@@ -1,0 +1,125 @@
+# naira-dependencies — the tier Naira talks to but does not ship (RFC-009 §1).
+#
+# NOTE: deliberately no `global.imageRegistry`. Helm globals propagate into
+# every subchart, and litellm's bundled bitnami PostgreSQL honours that key —
+# setting it rewrites bitnami's own images and trips their image-verification
+# guard. First-party registries stay local to the component that needs one.
+
+# ── what is installed ─────────────────────────────────────────────────────────
+# One switch per component. Four are on: an operator who runs none of this gets
+# a working environment. An adopter turns off what they already have.
+#
+# Tags, not `condition: <name>.enabled` — see the note in Chart.yaml.
+tags:
+  keycloak: true
+  litellm: true          # includes its own PostgreSQL
+  mlflow: true
+  mcpMock: true
+  openmetadata: false
+  monitoring: false      # kube-prometheus-stack AND the ServiceMonitors
+  llamacpp: false
+  vllm: false
+
+# ── on by default ─────────────────────────────────────────────────────────────
+
+keycloak:
+  image: quay.io/keycloak/keycloak:26.6.4
+  realm: naira
+  # Browser-facing hostname. Port-forwarded in every environment reached from
+  # a laptop, which is why it is localhost and not a cluster DNS name.
+  hostname: http://localhost:8080
+  admin:
+    # Same rule as everywhere else: supply the Secret, do not commit it.
+    existingSecret: ""
+    create: false
+    username: ""
+    password: ""
+  resources:
+    requests: {cpu: 200m, memory: 512Mi}
+    limits: {cpu: 1000m, memory: 1Gi}
+
+litellm:
+  fullnameOverride: litellm
+  replicaCount: 1
+  service: {type: ClusterIP, port: 4000}
+  ingress: {enabled: false}
+  # The bundled PostgreSQL. This is the tier's database.
+  postgresql:
+    architecture: standalone
+    primary:
+      resources:
+        requests: {cpu: 100m, memory: 256Mi}
+        limits: {cpu: 500m, memory: 512Mi}
+  migrationJob: {enabled: true}
+  proxyConfigMap: {create: true, key: config.yaml}
+  proxy_config:
+    model_list:
+      - model_name: chat-small
+        litellm_params:
+          model: mistral/mistral-small-latest
+          api_key: os.environ/MISTRAL_API_KEY
+          api_base: https://api.mistral.ai/v1
+  resources:
+    requests: {cpu: 200m, memory: 512Mi}
+    # 1Gi is not enough — LiteLLM OOMKills on startup. component-testbed's
+    # Flux HelmRelease already carries 2Gi; this matches it.
+    limits: {memory: 2Gi}
+
+mlflow:
+  fullnameOverride: mlflow
+  replicaCount: 1
+  service: {enabled: true, type: ClusterIP, port: 5000}
+  backendStore:
+    databaseMigration: false
+  # MLflow 3.x binds localhost-only and its security middleware rejects
+  # requests from anywhere else — including the kubelet's probes, so the
+  # container restarts forever. The chart already passes --host 0.0.0.0;
+  # allowed-hosts is the missing half.
+  #
+  # workers=1 because the chart defaults to 4 and each loads the full stack:
+  # four of them OOMKill inside 1Gi.
+  extraArgs:
+    allowed-hosts: "*"
+    workers: "1"
+  # Keep BLAS from grabbing every core on a kind node — the same fix
+  # component-testbed already carries for its Flux HelmRelease.
+  extraEnvVars:
+    OPENBLAS_NUM_THREADS: "1"
+    OMP_NUM_THREADS: "1"
+    MKL_NUM_THREADS: "1"
+    NUMEXPR_NUM_THREADS: "1"
+    VECLIB_MAXIMUM_THREADS: "1"
+  resources:
+    requests: {cpu: 200m, memory: 512Mi}
+    limits: {cpu: 1000m, memory: 2Gi}
+
+mcpMock:
+  # Test double backing the catalog's mcp-servers plugin. Never in a release —
+  # its image is published from dev-publish.yml only (RFC-009 prerequisite 2).
+  image:
+    registry: ""
+    repository: naira-mcp-mock
+    tag: ""
+  port: 8080
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 200m, memory: 128Mi}
+
+# ── off by default ────────────────────────────────────────────────────────────
+
+servicemonitors:
+  # Gated by tags.monitoring together with kube-prometheus-stack, so the CRs
+  # can never be applied before the operator that defines them.
+  catalogPort: 8090
+
+llamacpp:
+  image: ghcr.io/ggml-org/llama.cpp:server
+  resources:
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {cpu: 2000m, memory: 4Gi}
+
+vllm:
+  image: vllm/vllm-openai-cpu:latest
+  resources:
+    requests: {cpu: 1000m, memory: 4Gi}
+    limits: {memory: 8Gi}

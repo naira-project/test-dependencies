@@ -1,0 +1,39 @@
+{{- if .Values.tags.mcpMock }}
+{{- $reg := .Values.mcpMock.image.registry }}
+{{- $img := printf "%s:%s" .Values.mcpMock.image.repository (.Values.mcpMock.image.tag | default .Chart.AppVersion) }}
+{{- if $reg }}{{ $img = printf "%s/%s" $reg $img }}{{ end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-mock
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "deps.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: mcp-mock}
+  template:
+    metadata:
+      labels:
+        app: mcp-mock
+        {{- include "deps.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: mcp-mock
+          image: {{ $img | quote }}
+          ports:
+            - {containerPort: {{ .Values.mcpMock.port }}, name: http}
+          resources: {{- toYaml .Values.mcpMock.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-mock
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "deps.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {app: mcp-mock}
+  ports:
+    - {name: http, port: {{ .Values.mcpMock.port }}, targetPort: http}
+{{- end }}

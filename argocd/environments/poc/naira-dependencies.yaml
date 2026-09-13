@@ -1,0 +1,51 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: naira-dependencies
+  namespace: argocd
+  annotations:
+    # Wave 4 — after the secret store (waves 0-3), before Naira itself.
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  project: naira
+  source:
+    # A released artifact, not a branch (RFC-009 §6).
+    #
+    # repoURL carries the oci:// scheme AND chart is a separate field. Dropping
+    # either one fails: without the scheme the repository secret does not match
+    # (so insecureOCIForceHttp is ignored); without `chart` ArgoCD rejects the
+    # spec. RFC-009 §6's example omits the scheme.
+    repoURL: oci://naira-poc-registry-tls:5000/charts/naira-dependencies
+    chart: naira-dependencies
+    targetRevision: 0.1.0-poc
+    helm:
+      valuesObject:
+        tags:
+          keycloak: true
+          litellm: true
+          mlflow: true
+          mcpMock: true
+          openmetadata: false
+          monitoring: false
+          llamacpp: false
+          vllm: false
+        keycloak:
+          admin:
+            create: true
+            username: admin
+            password: admin
+        mcpMock:
+          image:
+            registry: naira-poc-registry:5000
+            repository: naira-mcp-mock
+            tag: 0.1.0-poc
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: naira-deps
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

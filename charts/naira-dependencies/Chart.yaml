@@ -1,0 +1,40 @@
+apiVersion: v2
+name: naira-dependencies
+description: Everything Naira talks to but does not ship — the dependency tier for RFC-009
+type: application
+# Versioned independently of Naira: these move on upstream upgrade cycles that
+# have nothing to do with a Naira release (RFC-009 §1).
+version: 0.1.0-poc
+appVersion: "0.1.0-poc"
+
+# Gating uses Helm `tags`, not `condition: <name>.enabled`.
+#
+# `condition` injects an `enabled` key into the subchart's own values, and any
+# upstream chart shipping a strict values.schema.json rejects it — mlflow 1.11.7
+# does exactly that. Tags live in the parent and are never passed down.
+#
+# It also buys something: one `monitoring` tag gates both kube-prometheus-stack
+# and the ServiceMonitors in templates/. The CRs cannot be applied without the
+# operator that defines them, structurally, rather than by a validation rule.
+dependencies:
+  # PostgreSQL comes from litellm's own subchart (litellm.postgresql.*) rather
+  # than a second standalone instance — one database, one lifecycle.
+  - name: litellm-helm
+    alias: litellm
+    version: "1.82.3"
+    repository: oci://docker.litellm.ai/berriai
+    tags: [litellm]
+  - name: mlflow
+    version: "1.11.7"
+    repository: https://community-charts.github.io/helm-charts
+    tags: [mlflow]
+  # Pulls MySQL, Elasticsearch and Airflow. Off by default — it does not fit on
+  # a single kind node alongside the rest.
+  - name: openmetadata
+    version: "2.0.1"
+    repository: https://helm.open-metadata.org
+    tags: [openmetadata]
+  - name: kube-prometheus-stack
+    version: "91.2.0"
+    repository: https://prometheus-community.github.io/helm-charts
+    tags: [monitoring]
