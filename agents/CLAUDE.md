@@ -1,4 +1,4 @@
-# Claude.md — test-dependencies
+# CLAUDE.md — test-dependencies
 
 Guidance for AI coding agents working in this repository.
 
