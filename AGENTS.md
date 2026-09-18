@@ -15,7 +15,6 @@ Naira does not implement inferencing, AI gateways and similar features itself; i
 connects to existing resources in Kubernetes and surfaces the relevant information to
 the end user.
 
-
 ## What this repo is
 
 Test-environment infrastructure for Naira, an open-source internal development
@@ -136,5 +135,5 @@ The PR template's `go test` and Docker Compose checkboxes do not apply to this r
 
 ## Unresolved template content
 
-`README.md`, `REUSE.toml` and the root `AGENTS.md` still hold SAP repository-template
-placeholders. Do not treat them as project documentation.
+`README.md` and `REUSE.toml` still hold SAP repository-template placeholders. Do not
+treat them as project documentation.
