@@ -54,4 +54,17 @@ done
 check "default renders differ only in the mlflow flask key" "mlflow-flask-server-secret-key " "$changed"
 rm -f "$a" "$b"
 
+DEV=(-f "$CHART/values-dev.yaml")
+check "dev: mcp-mock off until its image is published (TD2)" "" \
+  "$(render "${DEV[@]}" | yq 'select(.kind == "Deployment" and .metadata.name == "mcp-mock") | .metadata.name')"
+check "dev: masterkey Secret created" "sk-local-litellm" \
+  "$(render "${DEV[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "litellm-masterkey") | .stringData.masterkey')"
+check "dev: provider keys Secret created" "litellm-provider-keys" \
+  "$(render "${DEV[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "litellm-provider-keys") | .metadata.name')"
+n=$(render "${DEV[@]}" | rg -c 'localhost:5001' || true)   # rg exits 1 on no match
+check "dev: no image points at the PoC registry" "0" "${n:-0}"
+a=$(mktemp); b=$(mktemp); render "${DEV[@]}" > "$a"; render "${DEV[@]}" > "$b"
+check "dev: two renders are identical" "yes" "$(cmp -s "$a" "$b" && echo yes || echo no)"
+rm -f "$a" "$b"
+
 exit $fail

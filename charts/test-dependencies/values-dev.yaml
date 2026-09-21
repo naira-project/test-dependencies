@@ -7,7 +7,7 @@ tags:
   keycloak: true
   litellm: true
   mlflow: true
-  mcpMock: true
+  mcpMock: false  # on in TD2, once test-dependencies publishes the mcp-mock image
   openmetadata: false
   monitoring: false
   llamacpp: false
@@ -19,5 +19,17 @@ keycloak:
     username: admin
     password: admin
 
-mcpMock:
-  image: {registry: localhost:5001, repository: naira-mcp-mock, tag: 0.1.0-poc}
+secrets:
+  litellmMasterkey:
+    create: true
+    value: sk-local-litellm
+  litellmProviderKeys:
+    create: true
+    data:
+      # Fake is fine: LiteLLM lists models without calling the provider.
+      MISTRAL_API_KEY: change-me
+
+mlflow:
+  # Pinned so renders are deterministic; upstream otherwise generates a new
+  # key on every render.
+  flaskServerSecretKey: local-dev-flask-key
