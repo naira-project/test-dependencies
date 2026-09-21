@@ -10,7 +10,6 @@ spec:
   generators:
     - list:
         elements:
-          - instance: dev-ephemeral
           - instance: staging
   template:
     metadata:

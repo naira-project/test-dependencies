@@ -13,7 +13,7 @@ spec:
     server: https://kubernetes.default.svc
   syncPolicy:
     automated:
-      prune: false
+      prune: true
       selfHeal: true
     retry:
       limit: 10
