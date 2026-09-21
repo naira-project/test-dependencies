@@ -39,6 +39,18 @@ spec:
             registry: naira-poc-registry:5000
             repository: naira-mcp-mock
             tag: 0.1.0-poc
+        secrets:
+          litellmMasterkey:
+            create: true
+            value: sk-local-litellm   # PoC only; equals the key poc/naira.yaml gives the catalog
+          litellmProviderKeys:
+            create: true
+            data:
+              MISTRAL_API_KEY: change-me
+        mlflow:
+          # Pinned so renders are deterministic; otherwise selfHeal fights a key that
+          # changes on every render.
+          flaskServerSecretKey: poc-flask-key
   destination:
     server: https://kubernetes.default.svc
     namespace: naira-deps

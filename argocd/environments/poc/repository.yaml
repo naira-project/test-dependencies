@@ -1,5 +1,7 @@
 # Chart registry for the PoC. TLS with a self-signed cert whose CA is loaded
-# into argocd-tls-certs-cm (see poc/certs and deploy/poc/up.sh).
+# into argocd-tls-certs-cm by the PoC scripts (deploy/poc/, including
+# poc/certs) in the naira repo's feat/rfc-009-deployment-consolidation
+# branch — see README.md in this directory.
 #
 # Why TLS at all for a throwaway registry: ArgoCD 3.5.2 did not honour
 # insecureOCIForceHttp against a plain-HTTP OCI registry — every pull went out
