@@ -1,11 +1,11 @@
 apiVersion: v2
-name: naira-dependencies
-description: Everything Naira talks to but does not ship — the dependency tier for RFC-009
+name: test-dependencies
+description: Third-party components Naira talks to but does not ship (RFC-009 §1)
 type: application
 # Versioned independently of Naira: these move on upstream upgrade cycles that
 # have nothing to do with a Naira release (RFC-009 §1).
-version: 0.1.0-poc
-appVersion: "0.1.0-poc"
+version: 0.1.0
+appVersion: "0.1.0"
 
 # Gating uses Helm `tags`, not `condition: <name>.enabled`.
 #

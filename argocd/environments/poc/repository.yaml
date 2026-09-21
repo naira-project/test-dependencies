@@ -33,6 +33,6 @@ metadata:
 stringData:
   type: helm
   name: naira-poc-chart-deps
-  url: oci://naira-poc-registry-tls:5000/charts/naira-dependencies
+  url: oci://naira-poc-registry-tls:5000/charts/test-dependencies
   enableOCI: "true"
   insecure: "true"

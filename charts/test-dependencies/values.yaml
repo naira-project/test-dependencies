@@ -1,4 +1,4 @@
-# naira-dependencies — the tier Naira talks to but does not ship (RFC-009 §1).
+# test-dependencies — the tier Naira talks to but does not ship (RFC-009 §1).
 #
 # NOTE: deliberately no `global.imageRegistry`. Helm globals propagate into
 # every subchart, and litellm's bundled bitnami PostgreSQL honours that key —

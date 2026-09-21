@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: naira-dependencies
+  name: test-dependencies
   namespace: argocd
   annotations:
     # Wave 4 — after the secret store (waves 0-3), before Naira itself.
@@ -15,8 +15,8 @@ spec:
     # either one fails: without the scheme the repository secret does not match
     # (so insecureOCIForceHttp is ignored); without `chart` ArgoCD rejects the
     # spec. RFC-009 §6's example omits the scheme.
-    repoURL: oci://naira-poc-registry-tls:5000/charts/naira-dependencies
-    chart: naira-dependencies
+    repoURL: oci://naira-poc-registry-tls:5000/charts/test-dependencies
+    chart: test-dependencies
     targetRevision: 0.1.0-poc
     helm:
       valuesObject:
