@@ -10,3 +10,5 @@ ArgoCD reconciles `instances/` into a cluster running vCluster Platform.
 | `instances/project.yaml` | Platform project. Wave 0. |
 | `instances/dev-ephemeral.yaml` | vCluster pinned to the tainted `ephemeral` NodePool; stopped nightly. |
 | `instances/staging.yaml` | vCluster pinned to `general-purpose`; must survive the nightly stop. |
+| `workload/` | Probe Deployment synced into each vCluster. |
+| `workload-applicationset.yaml` | One Application per vCluster; applied by hand. |

@@ -1,0 +1,29 @@
+# Applied by hand. The destination URL is deterministic:
+# https://<loftHost>/kubernetes/project/<project>/virtualcluster/<instance>
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: vcluster-probe
+  namespace: argocd
+spec:
+  goTemplate: true
+  generators:
+    - list:
+        elements:
+          - instance: dev-ephemeral
+          - instance: staging
+  template:
+    metadata:
+      name: "probe-{{ .instance }}"
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/naira-project/test-dependencies.git
+        targetRevision: spike/vcluster-gitops
+        path: infrastructure/testbed/vcluster/workload
+      destination:
+        server: "https://loft.vcluster-platform.svc.cluster.local/kubernetes/project/team-alpha/virtualcluster/{{ .instance }}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
