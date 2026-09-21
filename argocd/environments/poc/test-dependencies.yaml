@@ -17,7 +17,7 @@ spec:
     # spec. RFC-009 §6's example omits the scheme.
     repoURL: oci://naira-poc-registry-tls:5000/charts/test-dependencies
     chart: test-dependencies
-    targetRevision: 0.1.0-poc
+    targetRevision: 0.1.0
     helm:
       valuesObject:
         tags:
