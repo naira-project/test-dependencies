@@ -1,0 +1,46 @@
+apiVersion: management.loft.sh/v1
+kind: VirtualClusterInstance
+metadata:
+  name: staging
+  namespace: p-team-alpha
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  clusterRef:
+    cluster: loft-cluster
+  owner:
+    user: admin
+  template:
+    helmRelease:
+      chart:
+        version: 0.37.1
+      values: |
+        controlPlane:
+          backingStore:
+            etcd:
+              deploy:
+                enabled: true
+                statefulSet:
+                  scheduling:
+                    nodeSelector:
+                      karpenter.sh/nodepool: general-purpose
+          statefulSet:
+            scheduling:
+              nodeSelector:
+                karpenter.sh/nodepool: general-purpose
+          coredns:
+            deployment:
+              nodeSelector:
+                karpenter.sh/nodepool: general-purpose
+        sync:
+          fromHost:
+            nodes:
+              enabled: true
+              selector:
+                labels:
+                  karpenter.sh/nodepool: general-purpose
+        integrations:
+          argoCD:
+            enabled: true
+            connector: argocd

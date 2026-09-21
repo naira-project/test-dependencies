@@ -1,0 +1,17 @@
+apiVersion: management.loft.sh/v1
+kind: Project
+metadata:
+  name: team-alpha
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  displayName: team-alpha
+  owner:
+    user: admin
+  allowedClusters:
+    - name: "*"
+  allowedTemplates:
+    - kind: VirtualClusterTemplate
+      group: storage.loft.sh
+      name: "*"
