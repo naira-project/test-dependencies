@@ -10,7 +10,10 @@ kind: ServiceMonitor
 metadata:
   name: litellm
   namespace: {{ .Release.Namespace }}
-  labels: {{- include "deps.labels" . | nindent 4 }}
+  labels:
+    {{- include "deps.labels" . | nindent 4 }}
+    # kube-prometheus-stack's Prometheus selects ServiceMonitors by this label.
+    release: {{ .Release.Name }}
 spec:
   selector:
     matchLabels: {app.kubernetes.io/name: litellm}

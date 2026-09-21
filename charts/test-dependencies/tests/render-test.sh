@@ -67,4 +67,16 @@ a=$(mktemp); b=$(mktemp); render "${DEV[@]}" > "$a"; render "${DEV[@]}" > "$b"
 check "dev: two renders are identical" "yes" "$(cmp -s "$a" "$b" && echo yes || echo no)"
 rm -f "$a" "$b"
 
+# keycloak admin Secret
+must_fail "keycloak admin create needs a username" "keycloak.admin.username is required" \
+  --set keycloak.admin.create=true --set keycloak.admin.password=x
+must_fail "keycloak admin create needs a password" "keycloak.admin.password is required" \
+  --set keycloak.admin.create=true --set keycloak.admin.username=x
+must_fail "keycloak admin: existing and create" "keycloak.admin: set existingSecret or create, not both" \
+  --set keycloak.admin.create=true --set keycloak.admin.existingSecret=x --set keycloak.admin.username=x --set keycloak.admin.password=x
+check "mcp-mock off by default" "" \
+  "$(render | yq 'select(.kind == "Deployment" and .metadata.name == "mcp-mock") | .metadata.name')"
+check "ServiceMonitor carries the release label" "t" \
+  "$(render --set tags.monitoring=true | yq 'select(.kind == "ServiceMonitor" and .metadata.name == "litellm") | .metadata.labels.release')"
+
 exit $fail

@@ -6,21 +6,19 @@
 # guard. First-party registries stay local to the component that needs one.
 
 # ── what is installed ─────────────────────────────────────────────────────────
-# One switch per component. Four are on: an operator who runs none of this gets
-# a working environment. An adopter turns off what they already have.
+# One switch per component. Three are on: an operator who runs none of this
+# gets a working environment. An adopter turns off what they already have.
 #
 # Tags, not `condition: <name>.enabled` — see the note in Chart.yaml.
 tags:
   keycloak: true
   litellm: true          # includes its own PostgreSQL
   mlflow: true
-  mcpMock: true
+  mcpMock: false          # this repo publishes the image in a later PR (TD2); off until then
   openmetadata: false
   monitoring: false      # kube-prometheus-stack AND the ServiceMonitors
   llamacpp: false
   vllm: false
-
-# ── on by default ─────────────────────────────────────────────────────────────
 
 # ── Secrets this chart can create ─────────────────────────────────────────────
 # Fixed names; the litellm subchart below is pointed at them. Default: the
@@ -33,7 +31,12 @@ secrets:
     create: false
     data: {}
 
+# ── on by default ─────────────────────────────────────────────────────────────
+
 keycloak:
+  # files/naira-realm.json carries development-only credentials: client secret
+  # naira-local-dev-secret, user testuser/testpass, registration open, SSL not
+  # required. Replace it for any shared environment.
   image: quay.io/keycloak/keycloak:26.6.4
   realm: naira
   # Browser-facing hostname. Port-forwarded in every environment reached from
@@ -41,6 +44,9 @@ keycloak:
   hostname: http://localhost:8080
   admin:
     # Same rule as everywhere else: supply the Secret, do not commit it.
+    # Default path (create: false, existingSecret: ""): the Deployment reads
+    # a Secret named <release name>-keycloak-admin with keys username and
+    # password, which the operator must supply (for example an ExternalSecret).
     existingSecret: ""
     create: false
     username: ""

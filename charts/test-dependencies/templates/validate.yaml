@@ -11,3 +11,6 @@ inference backends, not a pair (RFC-009 §1).
 {{- if and .Values.tags.llamacpp .Values.tags.vllm }}
 {{- fail "tags.llamacpp and tags.vllm are mutually exclusive inference backends — enable one, not both" }}
 {{- end }}
+{{- if and .Values.tags.keycloak .Values.keycloak.admin.create .Values.keycloak.admin.existingSecret }}
+{{- fail "keycloak.admin: set existingSecret or create, not both" }}
+{{- end }}

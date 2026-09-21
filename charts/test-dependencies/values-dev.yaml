@@ -1,7 +1,8 @@
 # Local kind. Tilt installs this chart with this file.
 #
 # On here is what fits on one kind node alongside the Naira chart: Keycloak,
-# LiteLLM + its PostgreSQL, MLflow, and the mcp-mock fixture.
+# LiteLLM + its PostgreSQL, and MLflow. mcp-mock stays off until its image is
+# published (TD2).
 
 tags:
   keycloak: true
