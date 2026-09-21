@@ -1,0 +1,57 @@
+# SPDX-FileCopyrightText: 2026 Naira Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+name: Chart
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ["charts/**", ".github/workflows/chart.yml"]
+  push:
+    branches: [main]
+    paths: ["charts/**", ".github/workflows/chart.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint · test-dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - run: helm dependency build charts/test-dependencies
+      - run: helm lint charts/test-dependencies -f charts/test-dependencies/values-dev.yaml
+      - run: charts/test-dependencies/tests/render-test.sh
+
+  install:
+    name: Install · test-dependencies on kind
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+      - run: helm dependency build charts/test-dependencies
+      - name: Install
+        run: |
+          # No --wait: the migrations Job is garbage-collected after 120s and
+          # Helm then fails on a healthy release.
+          helm install test-dependencies charts/test-dependencies \
+            -n naira-deps --create-namespace \
+            -f charts/test-dependencies/values-dev.yaml
+          kubectl -n naira-deps wait --for=condition=Available deployment --all --timeout=12m
+          kubectl -n naira-deps wait --for=jsonpath='{.status.readyReplicas}'=1 statefulset --all --timeout=12m
+      - name: Show state
+        if: always()
+        run: kubectl -n naira-deps get pods,jobs -o wide
