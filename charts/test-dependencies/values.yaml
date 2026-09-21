@@ -22,6 +22,17 @@ tags:
 
 # ── on by default ─────────────────────────────────────────────────────────────
 
+# ── Secrets this chart can create ─────────────────────────────────────────────
+# Fixed names; the litellm subchart below is pointed at them. Default: the
+# operator supplies them (ExternalSecret). create: true is for kind and e2e.
+secrets:
+  litellmMasterkey:
+    create: false
+    value: ""
+  litellmProviderKeys:
+    create: false
+    data: {}
+
 keycloak:
   image: quay.io/keycloak/keycloak:26.6.4
   realm: naira
@@ -40,12 +51,21 @@ keycloak:
 
 litellm:
   fullnameOverride: litellm
+  # Never let the subchart generate a key: it re-randomises on every render.
+  masterkeySecretName: litellm-masterkey
+  masterkeySecretKey: masterkey
+  environmentSecrets: [litellm-provider-keys]
   replicaCount: 1
   service: {type: ClusterIP, port: 4000}
   ingress: {enabled: false}
   # The bundled PostgreSQL. This is the tier's database.
   postgresql:
     architecture: standalone
+    auth:
+      # litellm-helm already renders litellm-dbcredentials with the key names
+      # bitnami expects (postgres-password, password). Reusing it stops bitnami
+      # rendering its own Secret with a random admin password on every render.
+      existingSecret: litellm-dbcredentials
     primary:
       resources:
         requests: {cpu: 100m, memory: 256Mi}
