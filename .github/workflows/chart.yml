@@ -6,10 +6,10 @@ name: Chart
 on:
   pull_request:
     branches: [main]
-    paths: ["charts/**", ".github/workflows/chart.yml"]
+    paths: ["charts/**", "ct.yaml", ".github/workflows/chart.yml"]
   push:
     branches: [main]
-    paths: ["charts/**", ".github/workflows/chart.yml"]
+    paths: ["charts/**", "ct.yaml", ".github/workflows/chart.yml"]
   workflow_dispatch:
 
 permissions:
@@ -26,13 +26,44 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0 # ct lint diffs against the target branch
           persist-credentials: false
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.3.0
+      - uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.8.0
       - run: helm dependency build charts/test-dependencies
       - run: helm lint charts/test-dependencies -f charts/test-dependencies/values-dev.yaml
       - run: charts/test-dependencies/tests/render-test.sh
+      - name: ct lint
+        env:
+          TARGET_BRANCH: ${{ github.event.repository.default_branch }}
+        run: ct lint --config ct.yaml --target-branch "$TARGET_BRANCH"
+      - name: Set up kubeconform
+        env:
+          KUBECONFORM_VERSION: v0.8.0
+          KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+        run: |
+          curl -sSLo kubeconform.tar.gz "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf kubeconform.tar.gz kubeconform
+          sudo mv kubeconform /usr/local/bin/kubeconform
+      - name: kubeconform
+        # Rendered manifests against the Kubernetes API schemas, for the dev
+        # values and for each tag that adds CRDs or a whole subchart. CRD
+        # schemas (ServiceMonitor) come from the datree catalog.
+        env:
+          KUBERNETES_VERSION: "1.36.1"
+        run: |
+          for extra in "" "--set tags.monitoring=true" "--set tags.openmetadata=true"; do
+            echo "== values-dev.yaml ${extra}"
+            # shellcheck disable=SC2086
+            helm template test-dependencies charts/test-dependencies --namespace naira-deps \
+              -f charts/test-dependencies/values-dev.yaml ${extra} \
+              | kubeconform -strict -summary -kubernetes-version "${KUBERNETES_VERSION}" \
+                  -schema-location default \
+                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          done
 
   install:
     name: Install · test-dependencies on kind
