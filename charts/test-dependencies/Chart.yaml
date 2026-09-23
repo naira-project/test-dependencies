@@ -28,8 +28,13 @@ dependencies:
     version: "1.11.7"
     repository: https://community-charts.github.io/helm-charts
     tags: [mlflow]
-  # Pulls MySQL, Elasticsearch and Airflow. Off by default — it does not fit on
-  # a single kind node alongside the rest.
+  # OpenMetadata is two upstream charts on one tag: the dependencies chart
+  # (MySQL, OpenSearch; Airflow disabled in values.yaml) and the server. Off by
+  # default — it is heavy for a single kind node alongside the rest.
+  - name: openmetadata-dependencies
+    version: "2.0.1"
+    repository: https://helm.open-metadata.org
+    tags: [openmetadata]
   - name: openmetadata
     version: "2.0.1"
     repository: https://helm.open-metadata.org

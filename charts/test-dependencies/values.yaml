@@ -30,6 +30,14 @@ secrets:
   litellmProviderKeys:
     create: false
     data: {}
+  # Secret `mysql-secrets` (key openmetadata-mysql-password): the password of
+  # MySQL user openmetadata_user, which upstream's init script creates with the
+  # literal `openmetadata_password` (openmetadata-dependencies.mysql.initdbScripts).
+  # Helm cannot template subchart values, so the two are kept equal by hand and
+  # checked by tests/render-test.sh. Change both or neither.
+  openmetadataMysql:
+    create: false
+    password: openmetadata_password
 
 # ── on by default ─────────────────────────────────────────────────────────────
 
@@ -132,6 +140,40 @@ mcpMock:
     limits: {cpu: 200m, memory: 128Mi}
 
 # ── off by default ────────────────────────────────────────────────────────────
+
+# The dependency tier the OpenMetadata server needs. Airflow (ingestion
+# orchestration) is off: the Naira plugin only reads the REST API, Airflow
+# needs a ReadWriteMany volume kind cannot provide, and its memory pushed
+# OpenSearch into OOM on a single node.
+openmetadata-dependencies:
+  airflow:
+    enabled: false
+  mysql:
+    # openmetadata_user exists only because of this script (upstream default,
+    # restated here so the password is visible next to secrets.openmetadataMysql).
+    initdbScripts:
+      init_openmetadata_db_scripts.sql: |
+        CREATE DATABASE openmetadata_db;
+        CREATE USER 'openmetadata_user'@'%' IDENTIFIED BY 'openmetadata_password';
+        GRANT ALL PRIVILEGES ON openmetadata_db.* TO 'openmetadata_user'@'%' WITH GRANT OPTION;
+        commit;
+
+# The server. Basic auth; the built-in `admin` user is created on first start
+# with password `admin` (upstream default, not configurable here) — the naira
+# chart's dev values log the plugin in with exactly that.
+openmetadata:
+  fullnameOverride: openmetadata   # reachable as openmetadata.<namespace>.svc:8585
+  openmetadata:
+    config:
+      # No Airflow, so the server must not health-check a pipeline service.
+      # auth off as well: upstream still mounts the Airflow password Secret
+      # otherwise, and the pod never starts without it.
+      pipelineServiceClientConfig:
+        enabled: false
+        airflow:
+          auth:
+            enabled: false
+
 
 servicemonitors:
   # Gated by tags.monitoring together with kube-prometheus-stack, so the CRs
