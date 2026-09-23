@@ -1,0 +1,47 @@
+# Keep MLflow 3.12; chart 0.1.0 defaults to its appVersion (3.14).
+image:
+  tag: v3.12.0-full
+fullnameOverride: mlflow
+server:
+  value_options:
+    host: 0.0.0.0
+    port: 5000
+    workers: 1
+    allowed_hosts: "*"
+  flag_options:
+    - serve_artifacts
+env:
+  - name: OPENBLAS_NUM_THREADS
+    value: "1"
+  - name: OMP_NUM_THREADS
+    value: "1"
+  - name: MKL_NUM_THREADS
+    value: "1"
+  - name: NUMEXPR_NUM_THREADS
+    value: "1"
+  - name: VECLIB_MAXIMUM_THREADS
+    value: "1"
+mlflow:
+  backendStoreUri: sqlite:////mlflow/mlflow.db
+  defaultArtifactRoot: /mlflow/artifacts
+  artifactsDestination: /mlflow/artifacts
+service:
+  type: ClusterIP
+storage:
+  enabled: true
+  size: 1Gi
+  accessMode: ReadWriteOnce
+  mountPath: /mlflow
+metrics:
+  enabled: false
+garbageCollection:
+  enabled: true
+  schedule: "0 2 * * 0"
+  olderThan: "30d"
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 2000m
+    memory: 2Gi

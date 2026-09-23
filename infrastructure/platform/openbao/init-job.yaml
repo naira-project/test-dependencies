@@ -10,7 +10,7 @@
 #   2. create-secret main container — reads the JSON, creates the K8s Secret via kubectl
 #
 # After this job completes, the Platform Engineer must:
-#   1. Encrypt the openbao-unseal-keys Secret with SealedSecrets or SOPS
+#   1. Encrypt the openbao-unseal-keys Secret with SealedSecrets
 #   2. Commit the encrypted form as unseal-keys-sealed.yaml
 #   3. Restart the OpenBao pod so the unsealer sidecar picks up the key
 # See README.md — Operator Runbook for detailed steps.
@@ -132,15 +132,7 @@ spec:
               echo "             -n naira-platform-openbao -o yaml) \\"
               echo "         > infrastructure/platform/openbao/unseal-keys-sealed.yaml"
               echo ""
-              echo "     SOPS/AGE:"
-              echo "       kubectl get secret openbao-unseal-keys \\"
-              echo "         -n naira-platform-openbao -o yaml \\"
-              echo "         | sops --encrypt --input-type=yaml --output-type=yaml \\"
-              echo "             --age \"\$(grep 'public key' ~/.config/sops/age/keys.txt \\"
-              echo "               | awk '{print \$4}')\" /dev/stdin \\"
-              echo "         > infrastructure/platform/openbao/unseal-keys-sealed.yaml"
-              echo ""
-              echo "  2. Commit unseal-keys-sealed.yaml and add it to kustomization.yaml."
+              echo "  2. Add unseal-keys-sealed.yaml to kustomization.yaml, commit, and push."
               echo "  3. Restart pod (OnDelete strategy — must delete manually):"
               echo "       kubectl delete pod openbao-0 -n naira-platform-openbao"
               echo "  4. Run: make platform-openbao-seed"

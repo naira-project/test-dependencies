@@ -1,12 +1,10 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+# Synced by the `openbao` Argo CD Application (application.yaml).
 resources:
   - namespace.yaml
-  - helmrepository-openbao.yaml
-  - helmrelease-openbao.yaml
   - rbac.yaml
   # unseal-keys-sealed.yaml is NOT listed here until a real encrypted form exists.
   # Add it after running platform-openbao-init and encrypting the Secret.
   # See unseal-keys-sealed.yaml for instructions.
-  - eso/

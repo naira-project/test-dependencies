@@ -1,0 +1,39 @@
+# Argo CD Application for the MLflow testbed.
+# Applied by `make testbed-mlflow-up` (envsubst fills MLFLOW_NS, REPO_URL, REVISION).
+# values.yaml is synced from Git; changes to this file itself (e.g. chart
+# version) need a re-run of `make testbed-mlflow-up`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ${MLFLOW_NS}
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ${MLFLOW_NS}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    managedNamespaceMetadata:
+      labels:
+        app.kubernetes.io/part-of: naira-testbed
+        app.kubernetes.io/component: mlflow
+  sources:
+    - repoURL: ${REPO_URL}
+      targetRevision: ${REVISION}
+      ref: repo
+    # Official chart published from mlflow/mlflow charts/ (same templates as
+    # the previously pinned Git commit a37edf9, without cloning mlflow/mlflow).
+    - repoURL: ghcr.io/mlflow/charts
+      chart: mlflow
+      targetRevision: 0.1.0
+      helm:
+        releaseName: mlflow
+        valueFiles:
+          - $repo/infrastructure/testbed/mlflow/values.yaml
