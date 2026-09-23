@@ -2,7 +2,6 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: litellm-smoke-test
-  namespace: ${LITELLM_NS}
   labels:
     app.kubernetes.io/name: litellm
     app.kubernetes.io/part-of: naira-testbed
@@ -30,7 +29,7 @@ spec:
             - -ec
           args:
             - |
-              base_url="http://litellm.${LITELLM_NS}.svc.cluster.local:4000"
+              base_url="http://litellm:4000"
 
               for i in $(seq 1 30); do
                 if curl -fsS "${base_url}/health/readiness" >/dev/null; then

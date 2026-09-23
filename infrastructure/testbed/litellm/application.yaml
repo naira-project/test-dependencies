@@ -1,0 +1,42 @@
+# Argo CD Application for the LiteLLM testbed.
+# Applied by `make testbed-litellm-up` (envsubst fills LITELLM_NS, REPO_URL, REVISION).
+# external-secret.yaml and values.yaml are synced from Git; changes to this
+# file itself (e.g. chart version) need a re-run of `make testbed-litellm-up`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ${LITELLM_NS}
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ${LITELLM_NS}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    managedNamespaceMetadata:
+      labels:
+        app.kubernetes.io/part-of: naira-testbed
+        app.kubernetes.io/component: litellm
+  sources:
+    - repoURL: ${REPO_URL}
+      targetRevision: ${REVISION}
+      path: infrastructure/testbed/litellm
+      directory:
+        include: external-secret.yaml
+    - repoURL: ${REPO_URL}
+      targetRevision: ${REVISION}
+      ref: repo
+    - repoURL: docker.litellm.ai/berriai
+      chart: litellm-helm
+      targetRevision: 1.82.3
+      helm:
+        releaseName: litellm
+        valueFiles:
+          - $repo/infrastructure/testbed/litellm/values.yaml

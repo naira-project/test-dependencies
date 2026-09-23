@@ -27,7 +27,7 @@ Engineering team and consumed by every plugin via External Secrets Operator (ESO
 
 ### What OpenBao is (in this repo)
 
-- **Always running** alongside the cluster, kgateway, Platform Mesh, and Flux
+- **Always running** alongside the cluster, kgateway, Platform Mesh, and Argo CD
 - **Owned by Platform Engineering** — not provisioned or operated by application developers
 - **A hard prerequisite** of every testbed and every plugin that reads secrets
 - **Bootstrapped once** per test environment; upgraded as a platform operation
@@ -73,14 +73,15 @@ job creates the Secret, the next pod restart picks it up automatically.
 
 ### External Secrets Operator
 
-ESO is deployed in the `external-secrets` namespace via a Flux HelmRelease alongside
-OpenBao. It is part of the same platform Kustomization.
+ESO is deployed in the `external-secrets` namespace by the `external-secrets`
+Argo CD Application, next to the `openbao` Application (both in `application.yaml`).
+Chart values live in `values.yaml` and `eso/values.yaml`; Argo CD syncs pushed changes.
 
 A single `ClusterSecretStore` named `openbao-platform` is available cluster-wide.
 Any namespace can reference it from `ExternalSecret` resources to project OpenBao
 KV v2 secrets into native Kubernetes Secrets.
-It is reconciled from `infrastructure/platform/openbao/eso/clustersecretstore`
-after the ESO CRDs are available.
+It is synced from `infrastructure/platform/openbao/eso/clustersecretstore.yaml`
+in sync wave 1, after the ESO chart (CRDs + webhook) is healthy.
 
 ESO authenticates to OpenBao via the Kubernetes auth method: it presents its own
 ServiceAccount token; OpenBao verifies it against the cluster's TokenReview API.
@@ -124,7 +125,7 @@ secret/
 These commands are safe for any developer to run at any time.
 
 ```bash
-# Show pod status, seal status, ClusterSecretStore, and Flux state
+# Show pod status, seal status, ClusterSecretStore, and Argo CD state
 make testbed-openbao-status
 
 # Port-forward OpenBao UI and API to http://127.0.0.1:8200
@@ -163,8 +164,8 @@ make platform-openbao-seed FORCE=true
 # Full teardown + redeploy (destroys all secrets — use only in dev clusters)
 make platform-openbao-reset
 
-# Update chart version (edit helmrelease-openbao.yaml first)
-make platform-openbao-upgrade
+# Update chart version (edit application.yaml first, then re-apply)
+make platform-openbao-up
 ```
 
 ---
@@ -206,18 +207,10 @@ make platform-openbao-upgrade
      > infrastructure/platform/openbao/unseal-keys-sealed.yaml
    ```
 
-   **With SOPS + AGE:**
+   Argo CD applies plain manifests only, so use SealedSecrets (SOPS would need an
+   Argo CD decryption plugin such as KSOPS).
 
-   ```bash
-   kubectl get secret openbao-unseal-keys \
-     -n naira-platform-openbao -o yaml \
-     | sops --encrypt --input-type yaml --output-type yaml \
-         --age "$(grep 'public key' ~/.config/sops/age/keys.txt | awk '{print $4}')" \
-         /dev/stdin \
-     > infrastructure/platform/openbao/unseal-keys-sealed.yaml
-   ```
-
-   Then add `unseal-keys-sealed.yaml` to `kustomization.yaml` resources and commit:
+   Then add `unseal-keys-sealed.yaml` to `kustomization.yaml` resources, commit, and push:
 
    ```bash
    git add infrastructure/platform/openbao/unseal-keys-sealed.yaml
@@ -268,7 +261,7 @@ If the cluster control plane was wiped but the OpenBao persistent volume was
 preserved:
 
 1. Re-apply the platform manifests: `make platform-openbao-up`
-2. Flux (or manual `kubectl apply`) decrypts and recreates `openbao-unseal-keys`
+2. Argo CD syncs the SealedSecret; the controller recreates `openbao-unseal-keys`
 3. Pod starts → unsealer sidecar reads key → unseals automatically
 4. Re-run seed: `make platform-openbao-seed`
 

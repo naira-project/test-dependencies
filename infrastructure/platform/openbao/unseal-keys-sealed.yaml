@@ -21,25 +21,12 @@
 #
 #   Then add unseal-keys-sealed.yaml to kustomization.yaml resources.
 #
-# ── SOPS + AGE ──────────────────────────────────────────────────────────
-#
-#   kubectl get secret openbao-unseal-keys \
-#     -n naira-platform-openbao -o yaml \
-#     | sops --encrypt \
-#         --input-type yaml \
-#         --output-type yaml \
-#         --age "$(cat ~/.config/sops/age/keys.txt | grep 'public key' | awk '{print $4}')" \
-#         /dev/stdin \
-#     > infrastructure/platform/openbao/unseal-keys-sealed.yaml
-#
-#   Add a .sops.yaml at the repo root to configure SOPS for automatic
-#   encryption/decryption on `kubectl apply`.
-#
 # ── After committing ─────────────────────────────────────────────────────
 #
 #   1. Add unseal-keys-sealed.yaml to resources in kustomization.yaml
-#   2. Apply: kubectl apply -k infrastructure/platform/openbao/
-#      (Flux will decrypt and create the Secret automatically)
+#   2. Push: the `openbao` Argo CD Application syncs the SealedSecret and the
+#      sealed-secrets controller creates the Secret
+#      (SOPS is not supported by Argo CD without a decryption plugin such as KSOPS)
 #   3. Restart the pod: kubectl rollout restart statefulset/openbao \
 #        -n naira-platform-openbao
 #

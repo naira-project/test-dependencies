@@ -1,0 +1,70 @@
+# Argo CD Applications for the OpenBao platform component and ESO.
+# Applied by `make platform-openbao-up` (envsubst fills REPO_URL and REVISION).
+# Manifests and values.yaml files are synced from Git; changes to this file
+# itself (e.g. chart versions) need a re-run of `make platform-openbao-up`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: openbao
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: naira-platform-openbao
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+  sources:
+    # Namespace + RBAC (kustomization.yaml)
+    - repoURL: ${REPO_URL}
+      targetRevision: ${REVISION}
+      path: infrastructure/platform/openbao
+    - repoURL: ${REPO_URL}
+      targetRevision: ${REVISION}
+      ref: repo
+    - repoURL: https://openbao.github.io/openbao-helm
+      chart: openbao
+      targetRevision: 0.28.2
+      helm:
+        valueFiles:
+          - $repo/infrastructure/platform/openbao/values.yaml
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: external-secrets
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: external-secrets
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # ESO CRDs exceed the client-side apply annotation size limit.
+      - ServerSideApply=true
+    retry:
+      limit: 5
+  sources:
+    # Namespace + RBAC + ClusterSecretStore (eso/kustomization.yaml)
+    - repoURL: ${REPO_URL}
+      targetRevision: ${REVISION}
+      path: infrastructure/platform/openbao/eso
+    - repoURL: ${REPO_URL}
+      targetRevision: ${REVISION}
+      ref: repo
+    - repoURL: https://charts.external-secrets.io
+      chart: external-secrets
+      targetRevision: 0.10.*
+      helm:
+        valueFiles:
+          - $repo/infrastructure/platform/openbao/eso/values.yaml

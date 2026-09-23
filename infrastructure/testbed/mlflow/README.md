@@ -2,7 +2,7 @@
 
 Reproducible MLflow Tracking Server and Model Registry for developing and testing the Naira MLflow Sync Plugin.
 
-Deployed as a Kubernetes workload in namespace `naira-testbed-mlflow` by default, reconciled by Flux.
+Deployed as a Kubernetes workload in namespace `naira-testbed-mlflow` by default, synced by Argo CD.
 
 ## Purpose
 
@@ -11,18 +11,17 @@ The Naira MLflow Sync Controller translates MLflow Registered Models and Model V
 ## Prerequisites
 
 - `kubectl` configured against a Kubernetes cluster (Minikube is supported)
-- `helm`
 - `make`
 - `envsubst`
-- Flux installed (source-controller + helm-controller)
-- A Flux `GitRepository` in `flux-system` that points to this repo
-  - By default, `make testbed-mlflow-up` expects that source to be named `component-testbed`
-  - If your source has a different name, pass it via `FLUX_SOURCE=<name>`
+- Argo CD installed in namespace `argocd`
+- This repo reachable by Argo CD at `REPO_URL` (default: the public GitHub URL)
+  - Argo CD syncs from `REVISION` (default `main`); push your branch and pass
+    `REVISION=<branch>` to test unmerged changes
 
 ## Quick Start
 
 ```bash
-# Reconcile MLflow via Flux and seed sample data (~2 min)
+# Sync MLflow via Argo CD and seed sample data (~2 min)
 make testbed-mlflow-up
 
 # Optional: use a developer-owned namespace
@@ -46,7 +45,7 @@ make testbed-mlflow-down
 | `make testbed-mlflow-up`           | Deploy MLflow and run the seed job             |
 | `make testbed-mlflow-down`         | Delete the namespace and all resources         |
 | `make testbed-mlflow-reset`        | Tear down and recreate from scratch            |
-| `make testbed-mlflow-status`       | Show pods, services, PVCs, and Flux state      |
+| `make testbed-mlflow-status`       | Show pods, services, PVCs, and Argo CD state   |
 | `make testbed-mlflow-port-forward` | Forward `localhost:5000` to the MLflow service |
 | `make testbed-mlflow-seed`         | Re-run the seed job (idempotent)               |
 
@@ -89,48 +88,14 @@ import mlflow
 mlflow.set_tracking_uri("http://mlflow.naira-testbed-mlflow.svc.cluster.local:5000")
 ```
 
-## Flux Reconciliation
+## Argo CD Sync
 
-If Flux is installed (source-controller + helm-controller), apply `flux-kustomization.yaml` to enable GitOps reconciliation:
+`make testbed-mlflow-up` applies `application.yaml` as an Argo CD Application named after the namespace. It renders the official MLflow chart (`oci://ghcr.io/mlflow/charts/mlflow`) with `values.yaml` from `REPO_URL` at `REVISION`. Pushed changes to `values.yaml` sync automatically.
 
 ```bash
-# Substitute your GitRepository source name if different from 'component-testbed'
-FLUX_SOURCE=component-testbed envsubst < infrastructure/testbed/mlflow/flux-kustomization.yaml | kubectl apply -f -
-
-# Check reconciliation state
 make testbed-mlflow-status
+kubectl get application naira-testbed-mlflow -n argocd
 ```
-
-Flux applies `infrastructure/testbed/mlflow/kustomization.yaml`, which creates a `GitRepository` for `mlflow/mlflow` and a `HelmRelease`. The helm-controller then installs the official chart from the pinned Git commit. Flux will re-apply automatically on every push.
-
-### Common Error: `GitRepository.source.toolkit.fluxcd.io "component-testbed" not found`
-
-This happens when Flux is installed, but there is no `GitRepository` source in `flux-system` for this repository. `make testbed-mlflow-up` only creates the MLflow `Kustomization`; it does not bootstrap Flux against this repo or create that source for you.
-
-Check which sources already exist:
-
-```bash
-kubectl get gitrepositories -n flux-system
-```
-
-Then fix it in one of these ways:
-
-```bash
-# Option 1: Reuse an existing source name
-FLUX_SOURCE=<existing-gitrepository> make testbed-mlflow-up
-```
-
-```bash
-# Option 2: Create a source for this repo and keep the default name
-flux create source git component-testbed \
-  --url=<repo-url> \
-  --branch=<branch> \
-  --namespace=flux-system
-
-make testbed-mlflow-up
-```
-
-If you bootstrap Flux from this repository, Flux will usually create the matching source automatically. The important part is that the `spec.sourceRef.name` in `infrastructure/testbed/mlflow/flux-kustomization.yaml` must match a real `GitRepository` in `flux-system`.
 
 ## Architecture
 
@@ -153,10 +118,7 @@ No Ingress is configured. Use `make testbed-mlflow-port-forward` for local brows
 
 ```
 infrastructure/testbed/mlflow/
-├── kustomization.yaml        # Namespace + GitRepository + HelmRelease
-├── flux-kustomization.yaml   # Flux Kustomization CR pointing to infrastructure/testbed/mlflow/
-├── git-repository.yaml       # Flux GitRepository (mlflow/mlflow, pinned commit)
-├── helm-release.yaml         # Flux HelmRelease for official chart path ./charts
-├── namespace.yaml
+├── application.yaml          # Argo CD Application (chart oci://ghcr.io/mlflow/charts/mlflow)
+├── values.yaml               # MLflow chart values
 └── seed-job.yaml             # ConfigMap (seed.py) + Job
 ```

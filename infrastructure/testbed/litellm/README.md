@@ -2,7 +2,7 @@
 
 Reproducible LiteLLM Proxy for developing and testing the Naira LiteLLM plugin against real in-cluster networking and the live Mistral API.
 
-Deployed as a Kubernetes workload in namespace `naira-testbed-litellm` by default, reconciled by Flux, using the official LiteLLM Helm chart `oci://docker.litellm.ai/berriai/litellm-helm` at tag `1.82.3`.
+Deployed as a Kubernetes workload in namespace `naira-testbed-litellm` by default, synced by Argo CD, using the official LiteLLM Helm chart `oci://docker.litellm.ai/berriai/litellm-helm` at tag `1.82.3`.
 
 ## Purpose
 
@@ -11,23 +11,22 @@ The Naira LiteLLM plugin will discover LiteLLM routes and translate them into Na
 ## Prerequisites
 
 - `kubectl` configured against a Kubernetes cluster
-- `helm`
 - `make`
 - `envsubst`
-- Flux installed with source-controller and helm-controller
+- Argo CD installed in namespace `argocd`
+- This repo reachable by Argo CD at `REPO_URL` (default: the public GitHub URL)
+  - Argo CD syncs from `REVISION` (default `main`); push your branch and pass
+    `REVISION=<branch>` to test unmerged changes
 - External Secrets Operator installed
 - A `ClusterSecretStore` named `openbao-platform`
   - Create it with `make platform-openbao-up`; the target installs OpenBao, ESO,
-    and the Flux Kustomization for the store.
-- A Flux `GitRepository` in `flux-system` that points to this repo
-  - By default, `make testbed-litellm-up` expects that source to be named `component-testbed`
-  - If your source has a different name, pass it via `FLUX_SOURCE=<name>`
+    and the store as Argo CD Applications.
 - A Mistral API key seeded by the OpenBao platform component from `LITELLM_MISTRAL_API_KEY`
 
 ## Quick Start
 
 ```bash
-# Reconcile LiteLLM via Flux and run chat + embeddings smoke tests
+# Sync LiteLLM via Argo CD and run chat + embeddings smoke tests
 make testbed-litellm-up
 
 # Optional: use a developer-owned namespace
@@ -53,10 +52,10 @@ make testbed-litellm-down
 
 | Command                             | Description                                                |
 | ----------------------------------- | ---------------------------------------------------------- |
-| `make testbed-litellm-up`           | Deploy LiteLLM through Flux and run the smoke test         |
-| `make testbed-litellm-down`         | Delete the Flux Kustomization, Helm release, and namespace |
+| `make testbed-litellm-up`           | Deploy LiteLLM through Argo CD and run the smoke test      |
+| `make testbed-litellm-down`         | Delete the Argo CD Application and namespace               |
 | `make testbed-litellm-reset`        | Tear down and recreate from scratch                        |
-| `make testbed-litellm-status`       | Show pods, service, ExternalSecret, Helm, and Flux state   |
+| `make testbed-litellm-status`       | Show pods, service, ExternalSecret, and Argo CD state      |
 | `make testbed-litellm-port-forward` | Forward `localhost:4000` to the LiteLLM service            |
 | `make testbed-litellm-smoke`        | Re-run the chat completion and embeddings smoke test       |
 | `make testbed-litellm-secret-scan`  | Check manifests for plaintext LiteLLM `api_key` values     |
@@ -149,15 +148,9 @@ https://api.mistral.ai/v1
 
 Any namespace-level egress policy must allow outbound HTTPS traffic to `api.mistral.ai`. Mistral's free tier has request-per-minute and monthly token limits that can change over time; check the current La Plateforme limits before running repeated CI jobs or manual loops. This testbed is intended for smoke tests and plugin development, not load testing.
 
-## Flux Reconciliation
+## Argo CD Sync
 
-Apply `flux-kustomization.yaml` through the Make target:
-
-```bash
-FLUX_SOURCE=component-testbed make testbed-litellm-up
-```
-
-The Flux Kustomization watches `./infrastructure/testbed/litellm` every minute. Updating the route list in `helm-release.yaml` and pushing the change causes Flux to reconcile the Helm release; the updated routes then appear in:
+`make testbed-litellm-up` applies `application.yaml` as an Argo CD Application named after the namespace. It renders the LiteLLM chart with `values.yaml` and applies `external-secret.yaml`, both from `REPO_URL` at `REVISION`. Updating the route list in `values.yaml` and pushing the change causes Argo CD to sync automatically; the updated routes then appear in:
 
 ```bash
 curl http://localhost:4000/v1/models
@@ -167,7 +160,7 @@ Check reconciliation state:
 
 ```bash
 make testbed-litellm-status
-kubectl get kustomization naira-testbed-litellm -n flux-system
+kubectl get application naira-testbed-litellm -n argocd
 ```
 
 ## Complete Removal
@@ -184,11 +177,8 @@ After namespace deletion completes, Kubernetes should report that the namespace 
 ```text
 infrastructure/testbed/litellm/
 ├── README.md
-├── kustomization.yaml        # Namespace + OCIRepository + ExternalSecret + HelmRelease
-├── flux-kustomization.yaml   # Flux Kustomization CR pointing to litellm/
-├── namespace.yaml
-├── oci-repository.yaml       # OCI source for docker.litellm.ai/berriai/litellm-helm
+├── application.yaml          # Argo CD Application (chart docker.litellm.ai/berriai/litellm-helm)
+├── values.yaml               # LiteLLM chart values and seeded routes
 ├── external-secret.yaml      # Mistral key projection from openbao-platform
-├── helm-release.yaml         # LiteLLM chart values and seeded routes
 └── smoke-test-job.yaml       # On-demand smoke test run by make
 ```

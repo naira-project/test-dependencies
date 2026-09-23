@@ -1,0 +1,45 @@
+replicaCount: 1
+
+environmentSecrets:
+  - litellm-mistral-api-key
+
+service:
+  type: ClusterIP
+  port: 4000
+
+ingress:
+  enabled: false
+
+proxyConfigMap:
+  create: true
+  key: config.yaml
+
+proxy_config:
+  model_list:
+    - model_name: chat-small
+      litellm_params:
+        model: mistral/mistral-small-latest
+        api_key: os.environ/MISTRAL_API_KEY
+        api_base: https://api.mistral.ai/v1
+    - model_name: chat-large
+      litellm_params:
+        model: mistral/mistral-large-latest
+        api_key: os.environ/MISTRAL_API_KEY
+        api_base: https://api.mistral.ai/v1
+    - model_name: chat-codestral
+      litellm_params:
+        model: mistral/codestral-latest
+        api_key: os.environ/MISTRAL_API_KEY
+        api_base: https://api.mistral.ai/v1
+    - model_name: text-embeddings
+      litellm_params:
+        model: mistral/mistral-embed
+        api_key: os.environ/MISTRAL_API_KEY
+        api_base: https://api.mistral.ai/v1
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 1Gi
+  limits:
+    memory: 2Gi
