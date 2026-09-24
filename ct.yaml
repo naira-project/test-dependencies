@@ -4,9 +4,3 @@ validate-maintainers: false
 # Chart version is set by release CI; until that exists, do not require a
 # manual bump on every chart change.
 check-version-increment: false
-# ct rebuilds dependencies itself; Chart.yaml's HTTP repositories must be
-# registered first (the OCI one needs no registration).
-chart-repos:
-  - community-charts=https://community-charts.github.io/helm-charts
-  - open-metadata=https://helm.open-metadata.org
-  - prometheus-community=https://prometheus-community.github.io/helm-charts
