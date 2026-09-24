@@ -34,6 +34,12 @@ secrets:
   openmetadataMysql:
     create: true   # password: chart default, equals the init script's literal
 
+litellm:
+  postgresql:
+    auth:
+      password: litellm-local-postgres
+      postgres-password: litellm-local-postgres
+
 mlflow:
   # Pinned so renders are deterministic; upstream otherwise generates a new
   # key on every render.

@@ -5,7 +5,8 @@ set -euo pipefail
 CHART="$(cd "$(dirname "$0")/.." && pwd)"
 fail=0
 
-render() { helm template t "$CHART" --namespace deps "$@"; }
+# Bare defaults do not render: secrets.litellmPostgres.password is required.
+render() { helm template t "$CHART" --namespace deps --set litellm.postgresql.auth.password=test-pg --set litellm.postgresql.auth.postgres-password=test-pg "$@"; }
 
 check() {
   if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: expected '$2', got '$3'"; fail=1; fi
@@ -61,11 +62,22 @@ check "dev: masterkey Secret created" "sk-local-litellm" \
   "$(render "${DEV[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "litellm-masterkey") | .stringData.masterkey')"
 check "dev: provider keys Secret created" "litellm-provider-keys" \
   "$(render "${DEV[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "litellm-provider-keys") | .metadata.name')"
-n=$(render "${DEV[@]}" | grep -c 'localhost:5001' || true)   # grep exits 1 on no match
+n=$(render "${DEV[@]}" | grep -c 'naira-poc-registry' || true)   # grep exits 1 on no match
 check "dev: no image points at the PoC registry" "0" "${n:-0}"
 a=$(mktemp); b=$(mktemp); render "${DEV[@]}" > "$a"; render "${DEV[@]}" > "$b"
 check "dev: two renders are identical" "yes" "$(cmp -s "$a" "$b" && echo yes || echo no)"
 rm -f "$a" "$b"
+a=$(mktemp); b=$(mktemp); render "${DEV[@]}" --set tags.openmetadata=true > "$a"; render "${DEV[@]}" --set tags.openmetadata=true > "$b"
+check "dev+openmetadata: two renders are identical" "yes" "$(cmp -s "$a" "$b" && echo yes || echo no)"
+rm -f "$a" "$b"
+check "dev: postgres image is pinned" "registry-1.docker.io/bitnamilegacy/postgresql:17.6.0-debian-12-r4" \
+  "$(render "${DEV[@]}" | yq ea 'select(.kind == "StatefulSet" and (.metadata.name | test("postgresql"))) | .spec.template.spec.containers[0].image')"
+check "dev: postgres password is the configured one, not the upstream sample" "litellm-local-postgres" \
+  "$(helm template t "$CHART" --namespace deps "${DEV[@]}" | yq ea 'select(.kind == "Secret" and .metadata.name == "litellm-dbcredentials") | .data.password' | base64 -d)"
+must_fail "postgres password required" "litellm.postgresql.auth.password is required" \
+  --set litellm.postgresql.auth.password=""
+must_fail "postgres password must not be the upstream sample" "must not be the litellm-helm sample" \
+  --set litellm.postgresql.auth.postgres-password=NoTaGrEaTpAsSwOrD
 
 # keycloak admin Secret
 must_fail "keycloak admin create needs a username" "keycloak.admin.username is required" \
@@ -91,9 +103,9 @@ check "openmetadata on: pipeline service client disabled" "false" \
   "$(render "${OM[@]}" | yq ea 'select(.kind == "Secret" and .data.PIPELINE_SERVICE_CLIENT_ENABLED != null) | .data.PIPELINE_SERVICE_CLIENT_ENABLED | @base64d' | tr -d '"')"
 check "openmetadata on: no mysql-secrets by default" "" \
   "$(render "${OM[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "mysql-secrets") | .metadata.name')"
-check "openmetadata on: mysql-secrets when create=true" "pw1" \
-  "$(render "${OM[@]}" --set secrets.openmetadataMysql.create=true --set secrets.openmetadataMysql.password=pw1 | yq 'select(.kind == "Secret" and .metadata.name == "mysql-secrets") | .stringData["openmetadata-mysql-password"]')"
-must_fail "openmetadata mysql Secret create rejects an empty password" "secrets.openmetadataMysql.password is required" \
+must_fail "openmetadata: Secret password must match the init script" "does not match the password in openmetadata-dependencies.mysql.initdbScripts" \
+  "${OM[@]}" --set secrets.openmetadataMysql.create=true --set secrets.openmetadataMysql.password=pw1
+must_fail "openmetadata mysql Secret create rejects an empty password" "secrets.openmetadataMysql.password" \
   "${OM[@]}" --set secrets.openmetadataMysql.create=true --set secrets.openmetadataMysql.password=""
 check "dev: openmetadata server references no Secret the release does not render" "" \
   "$(o=$(render "${DEV[@]}" "${OM[@]}"); comm -23 <(echo "$o" | yq ea 'select(.kind == "Deployment" and .metadata.name == "openmetadata") | [.spec.template.spec.initContainers[].env[]?, .spec.template.spec.containers[0].env[]?] | .[] | (.valueFrom.secretKeyRef.name // "")' | grep -v '^$' | sort -u) <(echo "$o" | yq ea 'select(.kind == "Secret") | .metadata.name' | sort -u) | paste -sd, -)"

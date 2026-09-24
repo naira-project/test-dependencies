@@ -1,5 +1,5 @@
 {{/*
-Inference backends. Mutually exclusive — _validate.tpl fails if both are on.
+Inference backends. Mutually exclusive — validate.yaml fails if both are on.
 Simplified relative to deploy/dev/stacks/llm-inference: one replica, no model
 pre-download init container. The model URL is a value, not a baked-in manifest.
 */}}

@@ -75,11 +75,20 @@ litellm:
   # The bundled PostgreSQL. This is the tier's database.
   postgresql:
     architecture: standalone
+    image:
+      # Pinned: the subchart's default is bitnami/postgresql:latest, a moving
+      # tag whose major can change under an existing data volume.
+      registry: registry-1.docker.io
+      repository: bitnamilegacy/postgresql
+      tag: 17.6.0-debian-12-r4
     auth:
-      # litellm-helm already renders litellm-dbcredentials with the key names
-      # bitnami expects (postgres-password, password). Reusing it stops bitnami
-      # rendering its own Secret with a random admin password on every render.
+      # litellm-helm renders litellm-dbcredentials from these two values and
+      # also writes `password` into the migration Job's DATABASE_URL as a plain
+      # value, so no Secret can hold it instead. Set both per environment;
+      # templates/validate.yaml rejects empty values and the upstream sample.
       existingSecret: litellm-dbcredentials
+      password: ""
+      postgres-password: ""
     primary:
       resources:
         requests: {cpu: 100m, memory: 256Mi}
@@ -149,6 +158,12 @@ openmetadata-dependencies:
   airflow:
     enabled: false
   mysql:
+    auth:
+      # Fixed so renders are deterministic (bitnami mysql otherwise generates
+      # random passwords on every render). Root/app-user passwords of a
+      # database that only OpenMetadata reaches; override per environment.
+      rootPassword: openmetadata-mysql-root
+      password: openmetadata-mysql-user
     # openmetadata_user exists only because of this script (upstream default,
     # restated here so the password is visible next to secrets.openmetadataMysql).
     initdbScripts:
