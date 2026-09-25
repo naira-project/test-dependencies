@@ -112,4 +112,13 @@ check "dev: openmetadata server references no Secret the release does not render
 check "dev: mysql-secrets equals the password in the MySQL init script" "yes" \
   "$(o=$(render "${DEV[@]}" "${OM[@]}"); a=$(echo "$o" | yq 'select(.kind == "Secret" and .metadata.name == "mysql-secrets") | .stringData["openmetadata-mysql-password"]'); b=$(echo "$o" | yq ea 'select(.kind == "ConfigMap" and .metadata.name == "mysql-init-scripts") | .data["init_openmetadata_db_scripts.sql"]' | sed -n "s/.*openmetadata_user'@'%' IDENTIFIED BY '\([^']*\)'.*/\1/p"); [ -n "$a" ] && [ "$a" = "$b" ] && echo yes || echo "no ($a vs $b)")"
 
+# The ArgoCD PoC Application must keep rendering against this chart's guards
+# (its valuesObject drifted from the chart once already).
+POC="$CHART/../../argocd/environments/poc/test-dependencies.yaml"
+poc_values=$(mktemp); yq '.spec.source.helm.valuesObject' "$POC" > "$poc_values"
+poc_vf=$(yq '.spec.source.helm.valueFiles[0] // ""' "$POC")
+check "argocd PoC Application values render" "ok" \
+  "$(helm template poc "$CHART" --namespace naira-deps ${poc_vf:+-f "$CHART/$poc_vf"} -f "$poc_values" >/dev/null 2>&1 && echo ok || echo "FAILED to render")"
+rm -f "$poc_values"
+
 exit $fail

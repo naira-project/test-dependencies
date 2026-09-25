@@ -39,6 +39,12 @@ spec:
             registry: naira-poc-registry:5000
             repository: naira-mcp-mock
             tag: 0.1.0-poc
+        litellm:
+          postgresql:
+            auth:
+              # PoC only. Required by the chart; the litellm-helm sample value is rejected.
+              password: litellm-poc-postgres
+              postgres-password: litellm-poc-postgres
         secrets:
           litellmMasterkey:
             create: true
