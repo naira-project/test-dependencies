@@ -113,6 +113,8 @@ check "llamacpp: init container downloads the model" "download-model" \
   "$(render --set tags.llamacpp=true | yq "$LLAMA | .initContainers[0].name")"
 check "llamacpp: server exposes metrics" "true" \
   "$(render --set tags.llamacpp=true | yq "$LLAMA | .containers[0].args | contains([\"--metrics\"])")"
+check "llamacpp: fsGroup so the unprivileged downloader can write the PVC" "$(yq '.llamacpp.fsGroup' "$CHART/values.yaml")" \
+  "$(render --set tags.llamacpp=true | yq "$LLAMA | .securityContext.fsGroup")"
 check "llamacpp: one shared model cache PVC" "llamacpp-model-cache" \
   "$(render --set tags.llamacpp=true | yq ea 'select(.kind == "PersistentVolumeClaim") | .metadata.name')"
 check "llamacpp: Services are labelled as inference" "llama-dummy-model,llama-qwen25-05b" \

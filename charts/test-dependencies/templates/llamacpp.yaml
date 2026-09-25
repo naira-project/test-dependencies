@@ -34,6 +34,8 @@ spec:
         {{- include "deps.labels" $ | nindent 8 }}
     spec:
       enableServiceLinks: false
+      securityContext:
+        fsGroup: {{ $.Values.llamacpp.fsGroup }}
       initContainers:
         - name: download-model
           image: {{ $.Values.llamacpp.downloadImage | quote }}

@@ -210,6 +210,10 @@ llamacpp:
   image: ghcr.io/ggml-org/llama.cpp:server
   downloadImage: curlimages/curl:8.11.1
   storage: 3Gi        # model cache PVC, shared by all models below
+  # The download image runs unprivileged and a CSI-provisioned volume (EBS)
+  # is root-owned: without fsGroup the download fails with "Permission
+  # denied". kind's hostPath provisioner is world-writable and hides that.
+  fsGroup: 1000
   # One Deployment and Service per entry. `name` is the Service name.
   models:
     - name: llama-qwen25-05b
