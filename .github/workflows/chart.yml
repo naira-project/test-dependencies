@@ -1,0 +1,115 @@
+# SPDX-FileCopyrightText: 2026 Naira Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+name: Chart
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ["charts/**", "argocd/**", "images/**", "ct.yaml", ".github/workflows/chart.yml"]
+  push:
+    branches: [main]
+    paths: ["charts/**", "argocd/**", "images/**", "ct.yaml", ".github/workflows/chart.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint · test-dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # ct lint diffs against the target branch
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.0
+      - uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.8.0
+      - name: Register chart repositories
+        # Helm 4 does not fetch from an unregistered HTTP repository; the OCI
+        # one (litellm) needs no registration.
+        run: |
+          helm repo add community-charts https://community-charts.github.io/helm-charts
+          helm repo add open-metadata https://helm.open-metadata.org
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+      - run: helm dependency build charts/test-dependencies
+      - run: helm lint charts/test-dependencies -f charts/test-dependencies/values-dev.yaml
+      - run: charts/test-dependencies/tests/render-test.sh
+      - name: ct lint
+        env:
+          TARGET_BRANCH: ${{ github.event.repository.default_branch }}
+        run: ct lint --config ct.yaml --target-branch "$TARGET_BRANCH"
+      - name: Set up kubeconform
+        env:
+          KUBECONFORM_VERSION: v0.8.0
+          KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+        run: |
+          curl -sSLo kubeconform.tar.gz "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf kubeconform.tar.gz kubeconform
+          sudo mv kubeconform /usr/local/bin/kubeconform
+      - name: kubeconform
+        # Rendered manifests against the Kubernetes API schemas, for the dev
+        # values and for each tag that adds CRDs or a whole subchart. CRD
+        # schemas (ServiceMonitor) come from the datree catalog.
+        env:
+          KUBERNETES_VERSION: "1.36.1"
+        run: |
+          for extra in "" "--set tags.monitoring=true" "--set tags.openmetadata=true" "--set tags.llamacpp=false --set tags.vllm=true --set tags.monitoring=true"; do
+            echo "== values-dev.yaml ${extra}"
+            # shellcheck disable=SC2086
+            helm template test-dependencies charts/test-dependencies --namespace naira-deps \
+              -f charts/test-dependencies/values-dev.yaml ${extra} \
+              | kubeconform -strict -summary -kubernetes-version "${KUBERNETES_VERSION}" \
+                  -schema-location default \
+                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          done
+
+  install:
+    name: Install · test-dependencies on kind
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.0
+      - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+      - name: Register chart repositories
+        # Helm 4 does not fetch from an unregistered HTTP repository; the OCI
+        # one (litellm) needs no registration.
+        run: |
+          helm repo add community-charts https://community-charts.github.io/helm-charts
+          helm repo add open-metadata https://helm.open-metadata.org
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+      - run: helm dependency build charts/test-dependencies
+      - name: Build and load mcp-mock
+        # Its published image only exists after a merge to main; the PR tests
+        # the source it contains.
+        run: |
+          docker build -t mcp-mock:ci images/mcp-mock
+          kind load docker-image mcp-mock:ci --name chart-testing
+      - name: Install
+        run: |
+          # No --wait: the migrations Job is garbage-collected after 120s and
+          # Helm then fails on a healthy release.
+          helm install test-dependencies charts/test-dependencies \
+            -n naira-deps --create-namespace \
+            -f charts/test-dependencies/values-dev.yaml \
+            --set mcpMock.image.registry="" \
+            --set mcpMock.image.repository=mcp-mock \
+            --set mcpMock.image.tag=ci
+          kubectl -n naira-deps wait --for=condition=Available deployment --all --timeout=12m
+          kubectl -n naira-deps wait --for=jsonpath='{.status.readyReplicas}'=1 statefulset --all --timeout=12m
+      - name: Show state
+        if: always()
+        run: kubectl -n naira-deps get pods,jobs -o wide

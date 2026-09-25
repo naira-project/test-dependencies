@@ -1,0 +1,55 @@
+# Local kind. Tilt installs this chart with this file.
+#
+# On here is what fits on one kind node alongside the Naira chart: Keycloak,
+# LiteLLM + its PostgreSQL, MLflow, llama.cpp (two small models, downloaded on
+# first start) and mcp-mock.
+
+tags:
+  keycloak: true
+  litellm: true
+  mlflow: true
+  mcpMock: true
+  openmetadata: false
+  monitoring: false
+  llamacpp: true
+  vllm: false
+
+keycloak:
+  admin:
+    create: true
+    username: admin
+    password: admin
+
+secrets:
+  litellmMasterkey:
+    create: true
+    value: sk-local-litellm
+  litellmProviderKeys:
+    create: true
+    data:
+      # Fake is fine: LiteLLM lists models without calling the provider.
+      MISTRAL_API_KEY: change-me
+  # tags.openmetadata stays off (heavy); this and the block below are wired so
+  # `--set tags.openmetadata=true` brings it up without further values.
+  openmetadataMysql:
+    create: true   # password: chart default, equals the init script's literal
+
+litellm:
+  postgresql:
+    auth:
+      password: litellm-local-postgres
+      postgres-password: litellm-local-postgres
+
+mlflow:
+  # Pinned so renders are deterministic; upstream otherwise generates a new
+  # key on every render.
+  flaskServerSecretKey: local-dev-flask-key
+
+openmetadata-dependencies:
+  mysql:
+    primary:
+      persistence:
+        size: 2Gi
+  opensearch:
+    persistence:
+      size: 2Gi

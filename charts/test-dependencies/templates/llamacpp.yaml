@@ -1,0 +1,110 @@
+{{/*
+llama.cpp: one Deployment and Service per entry in llamacpp.models, sharing one
+model cache PVC. An init container downloads the model file once; later starts
+find it cached. Mutually exclusive with vLLM (validate.yaml).
+*/}}
+{{- if .Values.tags.llamacpp }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: llamacpp-model-cache
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "deps.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.llamacpp.storage }}
+{{- range .Values.llamacpp.models }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels: {{- include "deps.labels" $ | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: {{ .name }}}
+  template:
+    metadata:
+      labels:
+        app: {{ .name }}
+        {{- include "deps.labels" $ | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        fsGroup: {{ $.Values.llamacpp.fsGroup }}
+      initContainers:
+        - name: download-model
+          image: {{ $.Values.llamacpp.downloadImage | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              MODEL_PATH="/models/{{ .modelFile }}"
+              if [ -f "$MODEL_PATH" ]; then
+                echo "{{ .name }} model already cached."
+                exit 0
+              fi
+              # Download to a temp name so an interrupted transfer is not mistaken for a cached model.
+              curl -fL -o "$MODEL_PATH.part" {{ .downloadUrl | quote }}
+              mv "$MODEL_PATH.part" "$MODEL_PATH"
+          volumeMounts:
+            - {name: model-storage, mountPath: /models}
+      containers:
+        - name: llama-server
+          image: {{ $.Values.llamacpp.image | quote }}
+          args:
+            - -m
+            - /models/{{ .modelFile }}
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8080"
+            - --metrics
+            - --no-ui
+            {{- if .contextSize }}
+            - -c
+            - {{ .contextSize | quote }}
+            {{- end }}
+            {{- if .threads }}
+            - --threads
+            - {{ .threads | quote }}
+            {{- end }}
+          ports:
+            - {containerPort: 8080, name: http}
+          volumeMounts:
+            - {name: model-storage, mountPath: /models}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: {{ .readinessDelay | default 2 }}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: {{ add (.readinessDelay | default 2) 3 }}
+            periodSeconds: 10
+          resources: {{- toYaml .resources | nindent 12 }}
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: llamacpp-model-cache
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: {{ .name }}
+    app.kubernetes.io/component: inference
+    {{- include "deps.labels" $ | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {app: {{ .name }}}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+{{- end }}
+{{- end }}
