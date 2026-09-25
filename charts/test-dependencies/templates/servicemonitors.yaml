@@ -22,3 +22,25 @@ spec:
       path: /metrics
       interval: 30s
 {{- end }}
+{{- if and .Values.tags.monitoring (or .Values.tags.llamacpp .Values.tags.vllm) }}
+---
+# One monitor for whichever backend is on: both Services carry the
+# `inference` component label and expose /metrics on port `http`
+# (llama.cpp via --metrics, vLLM natively).
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: inference
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "deps.labels" . | nindent 4 }}
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/component: inference}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+{{- end }}

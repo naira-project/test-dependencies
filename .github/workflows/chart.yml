@@ -6,10 +6,10 @@ name: Chart
 on:
   pull_request:
     branches: [main]
-    paths: ["charts/**", "argocd/**", "ct.yaml", ".github/workflows/chart.yml"]
+    paths: ["charts/**", "argocd/**", "images/**", "ct.yaml", ".github/workflows/chart.yml"]
   push:
     branches: [main]
-    paths: ["charts/**", "argocd/**", "ct.yaml", ".github/workflows/chart.yml"]
+    paths: ["charts/**", "argocd/**", "images/**", "ct.yaml", ".github/workflows/chart.yml"]
   workflow_dispatch:
 
 permissions:
@@ -62,7 +62,7 @@ jobs:
         env:
           KUBERNETES_VERSION: "1.36.1"
         run: |
-          for extra in "" "--set tags.monitoring=true" "--set tags.openmetadata=true"; do
+          for extra in "" "--set tags.monitoring=true" "--set tags.openmetadata=true" "--set tags.llamacpp=false --set tags.vllm=true --set tags.monitoring=true"; do
             echo "== values-dev.yaml ${extra}"
             # shellcheck disable=SC2086
             helm template test-dependencies charts/test-dependencies --namespace naira-deps \
@@ -92,13 +92,22 @@ jobs:
           helm repo add open-metadata https://helm.open-metadata.org
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
       - run: helm dependency build charts/test-dependencies
+      - name: Build and load mcp-mock
+        # Its published image only exists after a merge to main; the PR tests
+        # the source it contains.
+        run: |
+          docker build -t mcp-mock:ci images/mcp-mock
+          kind load docker-image mcp-mock:ci
       - name: Install
         run: |
           # No --wait: the migrations Job is garbage-collected after 120s and
           # Helm then fails on a healthy release.
           helm install test-dependencies charts/test-dependencies \
             -n naira-deps --create-namespace \
-            -f charts/test-dependencies/values-dev.yaml
+            -f charts/test-dependencies/values-dev.yaml \
+            --set mcpMock.image.registry="" \
+            --set mcpMock.image.repository=mcp-mock \
+            --set mcpMock.image.tag=ci
           kubectl -n naira-deps wait --for=condition=Available deployment --all --timeout=12m
           kubectl -n naira-deps wait --for=jsonpath='{.status.readyReplicas}'=1 statefulset --all --timeout=12m
       - name: Show state

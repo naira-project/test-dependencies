@@ -1,17 +1,17 @@
 # Local kind. Tilt installs this chart with this file.
 #
 # On here is what fits on one kind node alongside the Naira chart: Keycloak,
-# LiteLLM + its PostgreSQL, and MLflow. mcp-mock stays off until its image is
-# published (TD2).
+# LiteLLM + its PostgreSQL, MLflow, llama.cpp (two small models, downloaded on
+# first start) and mcp-mock.
 
 tags:
   keycloak: true
   litellm: true
   mlflow: true
-  mcpMock: false  # on in TD2, once test-dependencies publishes the mcp-mock image
+  mcpMock: true
   openmetadata: false
   monitoring: false
-  llamacpp: false
+  llamacpp: true
   vllm: false
 
 keycloak:

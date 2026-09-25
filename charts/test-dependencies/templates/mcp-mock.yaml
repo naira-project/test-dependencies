@@ -18,6 +18,9 @@ spec:
         app: mcp-mock
         {{- include "deps.labels" . | nindent 8 }}
     spec:
+      {{- with .Values.mcpMock.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: mcp-mock
           image: {{ $img | quote }}

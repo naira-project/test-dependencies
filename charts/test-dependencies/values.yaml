@@ -14,7 +14,7 @@ tags:
   keycloak: true
   litellm: true          # includes its own PostgreSQL
   mlflow: true
-  mcpMock: false          # this repo publishes the image in a later PR (TD2); off until then
+  mcpMock: false          # test double; on in values-dev.yaml
   openmetadata: false
   monitoring: false      # kube-prometheus-stack AND the ServiceMonitors
   llamacpp: false
@@ -137,12 +137,16 @@ mlflow:
     limits: {cpu: 1000m, memory: 2Gi}
 
 mcpMock:
-  # Test double backing the catalog's mcp-servers plugin. Never in a release —
-  # its image is published from dev-publish.yml only (RFC-009 prerequisite 2).
+  # Test double backing the catalog's mcp-servers plugin. Never in a release.
+  # Source: images/mcp-mock; published by .github/workflows/mcp-mock-image.yml
+  # as <appVersion> and sha-<commit>; a published appVersion tag is immutable.
   image:
-    registry: ""
-    repository: naira-mcp-mock
-    tag: ""
+    registry: ghcr.io/naira-project
+    repository: test-dependencies/mcp-mock
+    tag: ""           # default: the chart's appVersion
+  # ghcr packages are private until made public. Then the cluster needs a
+  # docker-registry Secret (read:packages) in this namespace, named here.
+  imagePullSecrets: []   # e.g. [{name: ghcr-pull}]
   port: 8080
   resources:
     requests: {cpu: 50m, memory: 64Mi}
@@ -204,12 +208,32 @@ servicemonitors:
 
 llamacpp:
   image: ghcr.io/ggml-org/llama.cpp:server
-  resources:
-    requests: {cpu: 500m, memory: 1Gi}
-    limits: {cpu: 2000m, memory: 4Gi}
+  downloadImage: curlimages/curl:8.11.1
+  storage: 3Gi        # model cache PVC, shared by all models below
+  # One Deployment and Service per entry. `name` is the Service name.
+  models:
+    - name: llama-qwen25-05b
+      modelFile: qwen2.5-0.5b-instruct-q4_k_m.gguf
+      downloadUrl: https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf
+      contextSize: "512"
+      threads: "2"
+      readinessDelay: 2
+      resources:
+        requests: {cpu: 300m, memory: 256Mi}
+        limits: {cpu: 2000m, memory: 1Gi}
+    - name: llama-dummy-model
+      modelFile: tiny-llama3-test-q2_k.gguf
+      downloadUrl: https://huggingface.co/tensorblock/tiny-llama3-test-GGUF/resolve/main/tiny-llama3-test-Q2_K.gguf
+      readinessDelay: 1
+      resources:
+        requests: {cpu: 50m, memory: 64Mi}
+        limits: {cpu: 200m, memory: 128Mi}
 
 vllm:
   image: vllm/vllm-openai-cpu:latest
+  model: facebook/opt-125m
+  servedModelName: opt-125m
+  kvCacheSpace: "1"   # GiB of CPU KV cache
   resources:
-    requests: {cpu: 1000m, memory: 4Gi}
-    limits: {memory: 8Gi}
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {cpu: 1000m, memory: 4Gi}

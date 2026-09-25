@@ -56,8 +56,19 @@ check "default renders differ only in the mlflow flask key" "mlflow-flask-server
 rm -f "$a" "$b"
 
 DEV=(-f "$CHART/values-dev.yaml")
-check "dev: mcp-mock off until its image is published (TD2)" "" \
+check "dev: mcp-mock on" "mcp-mock" \
   "$(render "${DEV[@]}" | yq 'select(.kind == "Deployment" and .metadata.name == "mcp-mock") | .metadata.name')"
+check "dev: mcp-mock image is the published one, tagged with appVersion" \
+  "ghcr.io/naira-project/test-dependencies/mcp-mock:$(helm show chart "$CHART" | yq '.appVersion')" \
+  "$(render "${DEV[@]}" | yq 'select(.kind == "Deployment" and .metadata.name == "mcp-mock") | .spec.template.spec.containers[0].image')"
+check "mcp-mock: no imagePullSecrets by default" "null" \
+  "$(render "${DEV[@]}" | yq 'select(.kind == "Deployment" and .metadata.name == "mcp-mock") | .spec.template.spec.imagePullSecrets')"
+check "mcp-mock: imagePullSecrets from values" "ghcr-pull" \
+  "$(render "${DEV[@]}" --set 'mcpMock.imagePullSecrets[0].name=ghcr-pull' | yq 'select(.kind == "Deployment" and .metadata.name == "mcp-mock") | .spec.template.spec.imagePullSecrets[0].name')"
+check "dev: llama.cpp models rendered" "llama-dummy-model,llama-qwen25-05b" \
+  "$(render "${DEV[@]}" | yq ea '[select(.kind == "Deployment" and .metadata.name == "llama-*") | .metadata.name] | sort | join(",")')"
+check "dev: vllm off" "" \
+  "$(render "${DEV[@]}" | yq 'select(.kind == "Deployment" and .metadata.name == "vllm") | .metadata.name')"
 check "dev: masterkey Secret created" "sk-local-litellm" \
   "$(render "${DEV[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "litellm-masterkey") | .stringData.masterkey')"
 check "dev: provider keys Secret created" "litellm-provider-keys" \
@@ -95,6 +106,38 @@ check "mcp-mock off by default" "" \
   "$(render | yq 'select(.kind == "Deployment" and .metadata.name == "mcp-mock") | .metadata.name')"
 check "ServiceMonitor carries the release label" "t" \
   "$(render --set tags.monitoring=true | yq 'select(.kind == "ServiceMonitor" and .metadata.name == "litellm") | .metadata.labels.release')"
+
+# inference backends
+LLAMA='select(.kind == "Deployment" and .metadata.name == "llama-qwen25-05b") | .spec.template.spec'
+check "llamacpp: init container downloads the model" "download-model" \
+  "$(render --set tags.llamacpp=true | yq "$LLAMA | .initContainers[0].name")"
+check "llamacpp: server exposes metrics" "true" \
+  "$(render --set tags.llamacpp=true | yq "$LLAMA | .containers[0].args | contains([\"--metrics\"])")"
+check "llamacpp: one shared model cache PVC" "llamacpp-model-cache" \
+  "$(render --set tags.llamacpp=true | yq ea 'select(.kind == "PersistentVolumeClaim") | .metadata.name')"
+check "llamacpp: Services are labelled as inference" "llama-dummy-model,llama-qwen25-05b" \
+  "$(render --set tags.llamacpp=true | yq ea '[select(.kind == "Service" and .metadata.labels["app.kubernetes.io/component"] == "inference") | .metadata.name] | sort | join(",")')"
+check "llamacpp: models come from values" "llama-only" \
+  "$(render --set tags.llamacpp=true --set-json 'llamacpp.models=[{"name":"llama-only","modelFile":"m.gguf","downloadUrl":"https://example.invalid/m.gguf","resources":{}}]' | yq ea 'select(.kind == "Deployment" and .metadata.name == "llama-*") | .metadata.name')"
+check "llamacpp: off by default" "" \
+  "$(render | yq ea 'select(.kind == "PersistentVolumeClaim" and .metadata.name == "llamacpp-model-cache") | .metadata.name')"
+VLLM='select(.kind == "Deployment" and .metadata.name == "vllm") | .spec.template.spec.containers[0]'
+check "vllm: container port is vLLM's own 8000" "8000" \
+  "$(render --set tags.vllm=true | yq "$VLLM | .ports[0].containerPort")"
+check "vllm: Service targets the named port" "8000" \
+  "$(render --set tags.vllm=true | yq 'select(.kind == "Service" and .metadata.name == "vllm") | .spec.ports[0].port')"
+check "vllm: serves the configured model name" "opt-125m" \
+  "$(render --set tags.vllm=true | yq "$VLLM | .args[2]")"
+check "vllm: mounts the chat template" "vllm-chat-template" \
+  "$(render --set tags.vllm=true | yq 'select(.kind == "ConfigMap" and .metadata.name == "vllm-chat-template") | .metadata.name')"
+check "inference ServiceMonitor follows monitoring + a backend" "inference" \
+  "$(render --set tags.monitoring=true --set tags.llamacpp=true | yq ea 'select(.kind == "ServiceMonitor" and .metadata.name == "inference") | .metadata.name')"
+check "inference ServiceMonitor also for vllm" "inference" \
+  "$(render --set tags.monitoring=true --set tags.vllm=true | yq ea 'select(.kind == "ServiceMonitor" and .metadata.name == "inference") | .metadata.name')"
+check "no inference ServiceMonitor without a backend" "" \
+  "$(render --set tags.monitoring=true | yq ea 'select(.kind == "ServiceMonitor" and .metadata.name == "inference") | .metadata.name')"
+check "no inference ServiceMonitor without monitoring" "" \
+  "$(render --set tags.llamacpp=true | yq ea 'select(.kind == "ServiceMonitor") | .metadata.name')"
 
 # openmetadata: server + its dependencies (MySQL, OpenSearch) ride one tag; Airflow stays off
 OM=(--set tags.openmetadata=true)
