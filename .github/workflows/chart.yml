@@ -97,7 +97,7 @@ jobs:
         # the source it contains.
         run: |
           docker build -t mcp-mock:ci images/mcp-mock
-          kind load docker-image mcp-mock:ci
+          kind load docker-image mcp-mock:ci --name chart-testing
       - name: Install
         run: |
           # No --wait: the migrations Job is garbage-collected after 120s and
