@@ -70,6 +70,11 @@ rm -f "$a" "$b"
 a=$(mktemp); b=$(mktemp); render "${DEV[@]}" --set tags.openmetadata=true > "$a"; render "${DEV[@]}" --set tags.openmetadata=true > "$b"
 check "dev+openmetadata: two renders are identical" "yes" "$(cmp -s "$a" "$b" && echo yes || echo no)"
 rm -f "$a" "$b"
+a=$(mktemp); b=$(mktemp); render "${DEV[@]}" --set tags.monitoring=true > "$a"; render "${DEV[@]}" --set tags.monitoring=true > "$b"
+check "dev+monitoring: two renders are identical" "yes" "$(cmp -s "$a" "$b" && echo yes || echo no)"
+rm -f "$a" "$b"
+check "ServiceMonitor for litellm is absent when litellm is off" "" \
+  "$(render --set tags.monitoring=true --set tags.litellm=false | yq ea 'select(.kind == "ServiceMonitor" and .metadata.name == "litellm") | .metadata.name')"
 check "dev: postgres image is pinned" "registry-1.docker.io/bitnamilegacy/postgresql:17.6.0-debian-12-r4" \
   "$(render "${DEV[@]}" | yq ea 'select(.kind == "StatefulSet" and (.metadata.name | test("postgresql"))) | .spec.template.spec.containers[0].image')"
 check "dev: postgres password is the configured one, not the upstream sample" "litellm-local-postgres" \

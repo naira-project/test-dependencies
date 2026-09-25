@@ -1,4 +1,4 @@
-{{- if .Values.tags.monitoring }}
+{{- if and .Values.tags.monitoring .Values.tags.litellm }}
 {{/*
 These are CRs of the operator kube-prometheus-stack installs. They ride its
 flag so they can never be applied before the CRDs exist — the split between

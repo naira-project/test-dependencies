@@ -190,6 +190,13 @@ openmetadata:
             enabled: false
 
 
+# kube-prometheus-stack: only what determinism needs. Grafana otherwise
+# generates a random admin password on every render, which an auto-synced
+# Application can never settle on. Override per environment.
+kube-prometheus-stack:
+  grafana:
+    adminPassword: grafana-local-admin
+
 servicemonitors:
   # Gated by tags.monitoring together with kube-prometheus-stack, so the CRs
   # can never be applied before the operator that defines them.
