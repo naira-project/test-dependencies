@@ -44,3 +44,18 @@ spec:
       interval: 15s
       scrapeTimeout: 10s
 {{- end }}
+
+
+---
+# ── LiteLLM proxy ────────────────────────────────────────────────────────────
+# LiteLLM requires the proxy master key as a bearer token on every route,
+# including /metrics.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: litellm-proxy-scrape-token
+  namespace: monitoring
+type: Opaque
+stringData:
+  token: sk-local-litellm
+---
