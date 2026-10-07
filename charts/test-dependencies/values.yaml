@@ -111,6 +111,12 @@ litellm:
           model: mistral/mistral-small-latest
           api_key: os.environ/MISTRAL_API_KEY
           api_base: https://api.mistral.ai/v1
+    # Exposes /metrics, which the `litellm` ServiceMonitor scrapes with the
+    # master key as bearer token.
+    litellm_settings:
+      callbacks:
+        - prometheus
+      prometheus_initialize_budget_metrics: true
   # INFO logs one line per request naming the upstream model, which is what
   # the UI's "View Logs" link filters the proxy's logs on.
   envVars:

@@ -21,6 +21,12 @@ spec:
     - port: http
       path: /metrics
       interval: 30s
+      # LiteLLM requires the proxy master key as a bearer token on every
+      # route, including /metrics.
+      authorization:
+        credentials:
+          name: {{ .Values.litellm.masterkeySecretName }}
+          key: {{ .Values.litellm.masterkeySecretKey }}
 {{- end }}
 {{- if and .Values.tags.monitoring (or .Values.tags.llamacpp .Values.tags.vllm) }}
 ---
@@ -44,18 +50,3 @@ spec:
       interval: 15s
       scrapeTimeout: 10s
 {{- end }}
-
-
----
-# ── LiteLLM proxy ────────────────────────────────────────────────────────────
-# LiteLLM requires the proxy master key as a bearer token on every route,
-# including /metrics.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: litellm-proxy-scrape-token
-  namespace: monitoring
-type: Opaque
-stringData:
-  token: sk-local-litellm
----
