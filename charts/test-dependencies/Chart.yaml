@@ -43,3 +43,22 @@ dependencies:
     version: "91.2.0"
     repository: https://prometheus-community.github.io/helm-charts
     tags: [monitoring]
+  # Logging: Alloy tails pod logs and pushes them to Loki; Grafana (from
+  # kube-prometheus-stack) queries Loki. Same tag as the metrics stack, so one
+  # switch brings up all of observability.
+  - name: loki
+    version: "7.3.0"
+    repository: https://grafana.github.io/helm-charts
+    tags: [monitoring]
+  - name: alloy
+    version: "1.13.0"
+    repository: https://grafana.github.io/helm-charts
+    tags: [monitoring]
+  # CloudWatch metrics (Bedrock) into Prometheus. Own tag rather than
+  # `monitoring`: it needs AWS credentials and every scrape is billed by AWS.
+  # Also needs tags.monitoring (ServiceMonitor CRD); templates/validate.yaml checks.
+  - name: yet-another-cloudwatch-exporter
+    alias: yace
+    version: "0.39.1"
+    repository: https://prometheus-community.github.io/helm-charts
+    tags: [yace]

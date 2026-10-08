@@ -16,9 +16,10 @@ tags:
   mlflow: true
   mcpMock: false          # test double; on in values-dev.yaml
   openmetadata: false
-  monitoring: false      # kube-prometheus-stack AND the ServiceMonitors
+  monitoring: false      # kube-prometheus-stack, the ServiceMonitors AND logging components (Loki and Alloy)
   llamacpp: false
   vllm: false
+  yace: false            # CloudWatch exporter; needs tags.monitoring and AWS credentials
 
 # ── Secrets this chart can create ─────────────────────────────────────────────
 # Fixed names; the litellm subchart below is pointed at them. Default: the
@@ -38,6 +39,14 @@ secrets:
   openmetadataMysql:
     create: false
     password: openmetadata_password
+  # Secret `yace-aws-credentials` (keys access_key, secret_key), read by YACE
+  # (yace.aws.secret.name). Never put the values in a file: pass them at install,
+  # --set secrets.yaceAws.accessKey=$AWS_ACCESS_KEY_ID ... Default: the operator
+  # supplies the Secret.
+  yaceAws:
+    create: false
+    accessKey: ""
+    secretKey: ""
 
 # ── on by default ─────────────────────────────────────────────────────────────
 
@@ -102,6 +111,16 @@ litellm:
           model: mistral/mistral-small-latest
           api_key: os.environ/MISTRAL_API_KEY
           api_base: https://api.mistral.ai/v1
+    # Exposes /metrics, which the `litellm` ServiceMonitor scrapes with the
+    # master key as bearer token.
+    litellm_settings:
+      callbacks:
+        - prometheus
+      prometheus_initialize_budget_metrics: true
+  # INFO logs one line per request naming the upstream model, which is what
+  # the UI's "View Logs" link filters the proxy's logs on.
+  envVars:
+    LITELLM_LOG: INFO
   resources:
     requests: {cpu: 200m, memory: 512Mi}
     # 1Gi is not enough — LiteLLM OOMKills on startup. component-testbed's
