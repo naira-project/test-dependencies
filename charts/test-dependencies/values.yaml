@@ -152,6 +152,24 @@ mcpMock:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {cpu: 200m, memory: 128Mi}
 
+# ── sample data ───────────────────────────────────────────────────────────────
+# One Job per component (templates/seed.yaml), rendered only when the
+# component's tag is on too. Off by default; on in values-dev.yaml.
+seed:
+  backoffLimit: 10       # retries with backoff while the server starts
+  mlflow:
+    enabled: false
+    # The mlflow subchart's own image: it has mlflow, pandas and numpy, so
+    # nothing is installed at runtime. Keep in step with the subchart.
+    image: burakince/mlflow:3.16.0
+  openmetadata:
+    enabled: false
+    image: python:3.13-slim
+    requests: requests==2.32.3   # installed by the Job at start
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+
 # ── off by default ────────────────────────────────────────────────────────────
 
 # The dependency tier the OpenMetadata server needs. Airflow (ingestion

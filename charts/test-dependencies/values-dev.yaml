@@ -2,7 +2,8 @@
 #
 # On here is what fits on one kind node alongside the Naira chart: Keycloak,
 # LiteLLM + its PostgreSQL, MLflow, llama.cpp (two small models, downloaded on
-# first start) and mcp-mock.
+# first start) and mcp-mock, plus sample data in MLflow (and in OpenMetadata
+# when its tag is on).
 
 tags:
   keycloak: true
@@ -29,6 +30,10 @@ secrets:
     data:
       # Fake is fine: LiteLLM lists models without calling the provider.
       MISTRAL_API_KEY: change-me
+      OPENAI_API_KEY: change-me
+      ANTHROPIC_API_KEY: change-me
+      GEMINI_API_KEY: change-me
+      OPENROUTER_API_KEY: change-me
   # tags.openmetadata stays off (heavy); this and the block below are wired so
   # `--set tags.openmetadata=true` brings it up without further values.
   openmetadataMysql:
@@ -39,11 +44,72 @@ litellm:
     auth:
       password: litellm-local-postgres
       postgres-password: litellm-local-postgres
+  # Sample catalog content for the Naira litellm plugins: several providers,
+  # one model name with two deployments (regions), an embedding model and a
+  # route to the local llama.cpp. Replaces values.yaml's list.
+  proxy_config:
+    model_list:
+      - model_name: chat-small
+        litellm_params:
+          model: mistral/mistral-small-latest
+          api_key: os.environ/MISTRAL_API_KEY
+          api_base: https://api.mistral.ai/v1
+      - model_name: idp-gpt-4o-mini
+        litellm_params:
+          model: openai/gpt-4o-mini
+          api_key: os.environ/OPENAI_API_KEY
+          api_base: https://api.openai.com/v1
+      - model_name: idp-claude-sonnet
+        litellm_params:
+          model: anthropic/claude-3-5-sonnet-latest
+          api_key: os.environ/ANTHROPIC_API_KEY
+          api_base: https://api.anthropic.com
+          region_name: us-east-1
+      - model_name: idp-claude-sonnet
+        litellm_params:
+          model: anthropic/claude-3-5-sonnet-latest
+          api_key: os.environ/ANTHROPIC_API_KEY
+          api_base: https://api.anthropic.com
+          region_name: eu-central-1
+      - model_name: idp-gemini-flash
+        litellm_params:
+          model: gemini/gemini-2.0-flash
+          api_key: os.environ/GEMINI_API_KEY
+          api_base: https://generativelanguage.googleapis.com
+      - model_name: idp-embedding-small
+        litellm_params:
+          model: openai/text-embedding-3-small
+          api_key: os.environ/OPENAI_API_KEY
+          api_base: https://api.openai.com/v1
+      - model_name: openrouter-gpt-3.5-turbo
+        litellm_params:
+          model: openrouter/openai/gpt-3.5-turbo
+          api_key: os.environ/OPENROUTER_API_KEY
+          api_base: https://openrouter.ai/api/v1
+      - model_name: idp-llama-qwen25-05b
+        litellm_params:
+          # llama.cpp from tags.llamacpp, same namespace; OpenAI-compatible.
+          model: openai/qwen2.5-0.5b-instruct
+          api_base: http://llama-qwen25-05b:8080/v1
+    litellm_settings:
+      callbacks: [prometheus]
+      prometheus_initialize_budget_metrics: true
+    mcp_servers:
+      mock_kb:
+        url: http://mcp-mock:8080/mcp
+        transport: http
+        description: Mock MCP server for local development
 
 mlflow:
   # Pinned so renders are deterministic; upstream otherwise generates a new
   # key on every render.
   flaskServerSecretKey: local-dev-flask-key
+
+seed:
+  mlflow:
+    enabled: true
+  openmetadata:
+    enabled: true   # renders only with tags.openmetadata
 
 openmetadata-dependencies:
   mysql:

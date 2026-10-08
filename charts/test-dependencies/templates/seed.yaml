@@ -1,0 +1,94 @@
+{{- /*
+Sample data for the components Naira catalogs: a registered model in MLflow
+and a database service with tables and lineage in OpenMetadata. Scripts live
+in files/seed/.
+
+Jobs are immutable, so the name carries the release revision: every
+`helm upgrade` replaces the Job instead of failing to patch it, and re-runs the
+seed. Both scripts are safe to re-run (MLflow adds a model version,
+OpenMetadata PUTs). backoffLimit covers the server still starting.
+*/}}
+{{- if and .Values.tags.mlflow .Values.seed.mlflow.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: seed-mlflow
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "deps.labels" . | nindent 4 }}
+data:
+  seed.py: |
+    {{- .Files.Get "files/seed/register_dummy_model.py" | nindent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed-mlflow-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "deps.labels" . | nindent 4 }}
+spec:
+  backoffLimit: {{ .Values.seed.backoffLimit }}
+  template:
+    metadata:
+      labels: {{- include "deps.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: seed
+          image: {{ .Values.seed.mlflow.image | quote }}
+          command: [python, /seed/seed.py]
+          # The server resolves its relative --default-artifact-root to
+          # /mlflow/mlruns and the client writes the artifacts there, in this
+          # container (same image, so /mlflow is writable). Only the registry
+          # entry reaches the server, which is what the catalog reads.
+          workingDir: /tmp
+          env:
+            - {name: MLFLOW_TRACKING_URI, value: "http://mlflow:{{ .Values.mlflow.service.port }}"}
+            - {name: HOME, value: /tmp}
+          resources: {{- toYaml .Values.seed.resources | nindent 12 }}
+          volumeMounts:
+            - {name: seed, mountPath: /seed}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: seed, configMap: {name: seed-mlflow}}
+        - {name: tmp, emptyDir: {}}
+{{- end }}
+{{- if and .Values.tags.openmetadata .Values.seed.openmetadata.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: seed-openmetadata
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "deps.labels" . | nindent 4 }}
+data:
+  seed.py: |
+    {{- .Files.Get "files/seed/seed_sample_tables.py" | nindent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed-openmetadata-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "deps.labels" . | nindent 4 }}
+spec:
+  backoffLimit: {{ .Values.seed.backoffLimit }}
+  template:
+    metadata:
+      labels: {{- include "deps.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: seed
+          image: {{ .Values.seed.openmetadata.image | quote }}
+          command:
+            - sh
+            - -c
+            - pip install --no-cache-dir --quiet {{ .Values.seed.openmetadata.requests | quote }} && python /seed/seed.py
+          env:
+            - {name: OPENMETADATA_HOST_PORT, value: "http://openmetadata:8585"}
+          resources: {{- toYaml .Values.seed.resources | nindent 12 }}
+          volumeMounts:
+            - {name: seed, mountPath: /seed}
+      volumes:
+        - {name: seed, configMap: {name: seed-openmetadata}}
+{{- end }}

@@ -162,6 +162,31 @@ check "dev: openmetadata server references no Secret the release does not render
 check "dev: mysql-secrets equals the password in the MySQL init script" "yes" \
   "$(o=$(render "${DEV[@]}" "${OM[@]}"); a=$(echo "$o" | yq 'select(.kind == "Secret" and .metadata.name == "mysql-secrets") | .stringData["openmetadata-mysql-password"]'); b=$(echo "$o" | yq ea 'select(.kind == "ConfigMap" and .metadata.name == "mysql-init-scripts") | .data["init_openmetadata_db_scripts.sql"]' | sed -n "s/.*openmetadata_user'@'%' IDENTIFIED BY '\([^']*\)'.*/\1/p"); [ -n "$a" ] && [ "$a" = "$b" ] && echo yes || echo "no ($a vs $b)")"
 
+# litellm sample models (values-dev.yaml)
+LITELLM_CFG='select(.kind == "ConfigMap" and .metadata.name == "litellm-config") | .data["config.yaml"] | from_yaml'
+check "dev: litellm routes a model to the local llama.cpp" "http://llama-qwen25-05b:8080/v1" \
+  "$(render "${DEV[@]}" | yq "$LITELLM_CFG | .model_list[] | select(.model_name == \"idp-llama-qwen25-05b\") | .litellm_params.api_base")"
+check "dev: litellm knows the mcp-mock server" "http://mcp-mock:8080/mcp" \
+  "$(render "${DEV[@]}" | yq "$LITELLM_CFG | .mcp_servers.mock_kb.url")"
+check "dev: every provider key the model list reads is in the Secret" "" \
+  "$(o=$(render "${DEV[@]}"); comm -23 <(echo "$o" | yq "$LITELLM_CFG | .model_list[].litellm_params.api_key | select(. != null) | sub(\"os.environ/\"; \"\")" | sort -u) <(echo "$o" | yq 'select(.kind == "Secret" and .metadata.name == "litellm-provider-keys") | .stringData | keys | .[]' | sort -u) | paste -sd, -)"
+
+# sample data Jobs
+check "seed: no Jobs by default" "" \
+  "$(render | yq ea 'select(.kind == "Job" and (.metadata.name | test("^seed-"))) | .metadata.name')"
+check "dev: mlflow seed Job, named per revision" "seed-mlflow-1" \
+  "$(render "${DEV[@]}" | yq ea 'select(.kind == "Job" and (.metadata.name | test("^seed-"))) | .metadata.name')"
+check "dev: mlflow seed reaches the mlflow Service" "http://mlflow:5000" \
+  "$(render "${DEV[@]}" | yq 'select(.kind == "Job" and .metadata.name == "seed-mlflow-1") | .spec.template.spec.containers[0].env[] | select(.name == "MLFLOW_TRACKING_URI") | .value')"
+check "seed: mlflow image is the subchart's" "$(render | yq 'select(.kind == "Deployment" and .metadata.name == "mlflow") | .spec.template.spec.containers[0].image')" \
+  "$(yq '.seed.mlflow.image' "$CHART/values.yaml")"
+check "seed: mlflow script is mounted" "yes" \
+  "$(render "${DEV[@]}" | yq 'select(.kind == "ConfigMap" and .metadata.name == "seed-mlflow") | .data["seed.py"]' | grep -q 'registered_model_name' && echo yes || echo no)"
+check "dev+openmetadata: openmetadata seed Job" "seed-mlflow-1,seed-openmetadata-1" \
+  "$(render "${DEV[@]}" "${OM[@]}" | yq ea '[select(.kind == "Job" and (.metadata.name | test("^seed-"))) | .metadata.name] | sort | join(",")')"
+check "seed: none for a component that is off" "" \
+  "$(render "${DEV[@]}" --set tags.mlflow=false | yq ea 'select(.kind == "Job" and (.metadata.name | test("^seed-"))) | .metadata.name')"
+
 # The ArgoCD PoC Application must keep rendering against this chart's guards
 # (its valuesObject drifted from the chart once already).
 POC="$CHART/../../argocd/environments/poc/test-dependencies.yaml"
