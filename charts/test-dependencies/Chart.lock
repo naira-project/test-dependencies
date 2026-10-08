@@ -1,0 +1,18 @@
+dependencies:
+- name: litellm-helm
+  repository: oci://docker.litellm.ai/berriai
+  version: 1.82.3
+- name: mlflow
+  repository: https://community-charts.github.io/helm-charts
+  version: 1.11.7
+- name: openmetadata-dependencies
+  repository: https://helm.open-metadata.org
+  version: 2.0.1
+- name: openmetadata
+  repository: https://helm.open-metadata.org
+  version: 2.0.1
+- name: kube-prometheus-stack
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 91.2.0
+digest: sha256:49edb976a2a41052b17be28387c87f4a8ef946e99f8ac35cd5a66b1999840ce0
+generated: "2026-09-23T19:41:31.748814+02:00"

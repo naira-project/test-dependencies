@@ -1,0 +1,69 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: test-dependencies
+  namespace: argocd
+  annotations:
+    # Wave 4 — after the secret store (waves 0-3), before Naira itself.
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  project: naira
+  source:
+    # A released artifact, not a branch (RFC-009 §6).
+    #
+    # repoURL carries the oci:// scheme AND chart is a separate field. Dropping
+    # either one fails: without the scheme the repository secret does not match
+    # (so insecureOCIForceHttp is ignored); without `chart` ArgoCD rejects the
+    # spec. RFC-009 §6's example omits the scheme.
+    repoURL: oci://naira-poc-registry-tls:5000/charts/test-dependencies
+    chart: test-dependencies
+    targetRevision: 0.1.0
+    helm:
+      valuesObject:
+        tags:
+          keycloak: true
+          litellm: true
+          mlflow: true
+          mcpMock: true
+          openmetadata: false
+          monitoring: false
+          llamacpp: false
+          vllm: false
+        keycloak:
+          admin:
+            create: true
+            username: admin
+            password: admin
+        mcpMock:
+          image:
+            registry: naira-poc-registry:5000
+            repository: naira-mcp-mock
+            tag: 0.1.0-poc
+        litellm:
+          postgresql:
+            auth:
+              # PoC only. Required by the chart; the litellm-helm sample value is rejected.
+              password: litellm-poc-postgres
+              postgres-password: litellm-poc-postgres
+        secrets:
+          litellmMasterkey:
+            create: true
+            value: sk-local-litellm   # PoC only; equals the key poc/naira.yaml gives the catalog
+          litellmProviderKeys:
+            create: true
+            data:
+              MISTRAL_API_KEY: change-me
+        mlflow:
+          # Pinned so renders are deterministic; otherwise selfHeal fights a key that
+          # changes on every render.
+          flaskServerSecretKey: poc-flask-key
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: naira-deps
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: naira
+  namespace: argocd
+spec:
+  description: Naira and the tier it depends on
+  sourceRepos:
+    # The scheme is part of the match — an Application whose repoURL carries
+    # oci:// is rejected against a bare host entry.
+    - "oci://naira-poc-registry-tls:5000/charts/*"
+    - "oci://ghcr.io/naira-project/charts/*"
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "*"
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: 2026 Naira Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# Publishes the chart as an OCI artifact:
+#   oci://ghcr.io/naira-project/charts/test-dependencies:<version>
+# Trigger: push a tag v<version>, where <version> is charts/test-dependencies/Chart.yaml's `version`.
+name: Chart publish
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish · test-dependencies
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.0
+      - name: Tag matches chart version
+        if: github.ref_type == 'tag'
+        run: |
+          VERSION=$(yq '.version' charts/test-dependencies/Chart.yaml)
+          if [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match chart version v${VERSION}"
+            exit 1
+          fi
+      - name: Register chart repositories
+        run: |
+          helm repo add community-charts https://community-charts.github.io/helm-charts
+          helm repo add open-metadata https://helm.open-metadata.org
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+      - run: helm dependency build charts/test-dependencies
+      - name: Package and push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${GITHUB_TOKEN}" | helm registry login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          helm package charts/test-dependencies
+          helm push test-dependencies-*.tgz oci://ghcr.io/naira-project/charts

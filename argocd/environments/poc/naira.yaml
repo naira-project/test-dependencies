@@ -1,0 +1,56 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: naira
+  namespace: argocd
+  annotations:
+    # Wave 5 — last. Nothing in Naira starts before its tier exists.
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  project: naira
+  source:
+    repoURL: oci://naira-poc-registry-tls:5000/charts/naira
+    chart: naira
+    targetRevision: 0.1.0-poc
+    helm:
+      valuesObject:
+        global:
+          imageRegistry: naira-poc-registry:5000
+        dependencies:
+          keycloak:
+            baseUrl: http://keycloak.naira-deps.svc.cluster.local:8080
+            realm: naira
+            issuer: http://localhost:8080/realms/naira
+            authUrl: http://localhost:8080/realms/naira/protocol/openid-connect/auth
+            baseDomain: localhost
+          litellm:
+            baseUrl: http://litellm.naira-deps.svc.cluster.local:4000
+          mlflow:
+            baseUrl: http://mlflow.naira-deps.svc.cluster.local:5000
+          openmetadata:
+            baseUrl: http://openmetadata.naira-deps.svc.cluster.local:8585
+            adminEmail: admin@open-metadata.org
+          mcp:
+            endpoints: mock-knowledge-base=http://mcp-mock.naira-deps.svc.cluster.local:8080/mcp
+        catalog:
+          # PoC only. Every other path supplies this as an ExternalSecret.
+          secret:
+            create: true
+            data:
+              LITELLM_API_KEY: sk-local-litellm
+              OPENMETADATA_ADMIN_PASSWORD: admin
+        portal:
+          oidc:
+            secret:
+              create: true
+              value: naira-local-dev-secret
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: idp-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

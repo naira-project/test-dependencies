@@ -1,0 +1,38 @@
+{{/*
+Renders no objects — it exists to fail the release early.
+
+NOTE: this file must NOT be named with a leading underscore. Helm treats
+_*.tpl as partials: it parses them but never executes their top-level content,
+so a `fail` in a partial silently never runs.
+
+The one constraint tags cannot express: llamacpp and vllm are alternative
+inference backends, not a pair (RFC-009 §1).
+*/}}
+{{- if and .Values.tags.llamacpp .Values.tags.vllm }}
+{{- fail "tags.llamacpp and tags.vllm are mutually exclusive inference backends — enable one, not both" }}
+{{- end }}
+{{- if and .Values.tags.keycloak .Values.keycloak.admin.create .Values.keycloak.admin.existingSecret }}
+{{- fail "keycloak.admin: set existingSecret or create, not both" }}
+{{- end }}
+
+{{- /* LiteLLM's PostgreSQL password: required, and not the upstream sample. */}}
+{{- if .Values.tags.litellm }}
+{{- range $k := list "password" "postgres-password" }}
+{{- $v := index $.Values.litellm.postgresql.auth $k | default "" }}
+{{- if or (eq $v "") (eq $v "NoTaGrEaTpAsSwOrD") }}
+{{- fail (printf "litellm.postgresql.auth.%s is required and must not be the litellm-helm sample value" $k) }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- /*
+OpenMetadata's MySQL user is created by an init script with a literal password;
+the Secret the server reads must carry the same literal.
+*/}}
+{{- if and .Values.tags.openmetadata .Values.secrets.openmetadataMysql.create }}
+{{- $pw := .Values.secrets.openmetadataMysql.password }}
+{{- $sql := index .Values "openmetadata-dependencies" "mysql" "initdbScripts" "init_openmetadata_db_scripts.sql" | default "" }}
+{{- if not (contains (printf "IDENTIFIED BY '%s'" $pw) $sql) }}
+{{- fail "secrets.openmetadataMysql.password does not match the password in openmetadata-dependencies.mysql.initdbScripts" }}
+{{- end }}
+{{- end }}

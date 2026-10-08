@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: 2026 Naira Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# mcp-mock is a test double for the catalog's mcp-servers plugin. Dev only,
+# never part of a Naira release. Published as <chart appVersion> and
+# sha-<commit>; the chart's default tag is the appVersion. A published
+# appVersion tag is never overwritten: changing the image source requires
+# bumping `appVersion` in charts/test-dependencies/Chart.yaml.
+name: mcp-mock image
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ["images/mcp-mock/**", ".github/workflows/mcp-mock-image.yml"]
+  push:
+    branches: [main]
+    paths: ["images/mcp-mock/**", ".github/workflows/mcp-mock-image.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/naira-project/test-dependencies/mcp-mock
+
+jobs:
+  build:
+    name: Build${{ github.event_name != 'pull_request' && ' and push' || '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Log in to ghcr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+      - name: appVersion is not published yet
+        run: |
+          APP_VERSION=$(yq '.appVersion' charts/test-dependencies/Chart.yaml)
+          if docker manifest inspect "${IMAGE}:${APP_VERSION}" >/dev/null 2>&1; then
+            echo "::error::${IMAGE}:${APP_VERSION} already exists; bump appVersion in charts/test-dependencies/Chart.yaml"
+            exit 1
+          fi
+      - name: Build
+        run: |
+          APP_VERSION=$(yq '.appVersion' charts/test-dependencies/Chart.yaml)
+          docker build \
+            -t "${IMAGE}:${APP_VERSION}" \
+            -t "${IMAGE}:sha-${GITHUB_SHA::7}" \
+            images/mcp-mock
+      - name: Push
+        if: github.event_name != 'pull_request'
+        run: docker push --all-tags "${IMAGE}"
