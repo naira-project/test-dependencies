@@ -69,6 +69,24 @@ openmetadata-dependencies:
 #     --set secrets.yaceAws.secretKey=$AWS_SECRET_ACCESS_KEY
 # The chart then creates the `yace-aws-credentials` Secret that aws.secret.name
 # points at.
+#
+# Required IAM permissions: read-only on CloudWatch metrics. Use a dedicated IAM
+# user with only this policy (the AWS-managed CloudWatchReadOnlyAccess also works
+# but additionally exposes logs, alarms and dashboards). CloudWatch read actions
+# do not support resource-level restrictions, hence Resource "*".
+#   {
+#     "Version": "2012-10-17",
+#     "Statement": [{
+#       "Sid": "YaceCloudWatchRead",
+#       "Effect": "Allow",
+#       "Action": [
+#         "cloudwatch:ListMetrics",
+#         "cloudwatch:GetMetricData",
+#         "cloudwatch:GetMetricStatistics"
+#       ],
+#       "Resource": "*"
+#     }]
+#   }
 
 yace:
   aws:
