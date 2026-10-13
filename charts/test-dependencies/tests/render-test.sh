@@ -134,6 +134,10 @@ check "vllm: Service targets the named port" "8000" \
   "$(render --set tags.vllm=true | yq 'select(.kind == "Service" and .metadata.name == "vllm") | .spec.ports[0].port')"
 check "vllm: serves the configured model name" "opt-125m" \
   "$(render --set tags.vllm=true | yq "$VLLM | .args[2]")"
+check "vllm: startup probe gates liveness for a 10-minute start" "600" \
+  "$(render --set tags.vllm=true | yq "$VLLM | .startupProbe.periodSeconds * .startupProbe.failureThreshold")"
+check "vllm: Hugging Face cache survives container restarts" "/root/.cache/huggingface" \
+  "$(render --set tags.vllm=true | yq "$VLLM | .volumeMounts[] | select(.name == \"hf-cache\") | .mountPath")"
 check "vllm: mounts the chat template" "vllm-chat-template" \
   "$(render --set tags.vllm=true | yq 'select(.kind == "ConfigMap" and .metadata.name == "vllm-chat-template") | .metadata.name')"
 check "inference ServiceMonitor follows monitoring + a backend" "inference" \
