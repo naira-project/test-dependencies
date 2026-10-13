@@ -138,6 +138,8 @@ check "vllm: --enforce-eager skips the torch.compile warm-up" "true" \
   "$(render --set tags.vllm=true | yq "$VLLM | .args | contains([\"--enforce-eager\"])")"
 check "vllm: enforceEager is a switch" "false" \
   "$(render --set tags.vllm=true --set vllm.enforceEager=false | yq "$VLLM | .args | contains([\"--enforce-eager\"])")"
+check "vllm: maxSurge 0, so a rollout never runs two vLLM pods" "0" \
+  "$(render --set tags.vllm=true | yq 'select(.kind == "Deployment" and .metadata.name == "vllm") | .spec.strategy.rollingUpdate.maxSurge')"
 check "vllm: startup probe gates liveness for a 10-minute start" "600" \
   "$(render --set tags.vllm=true | yq "$VLLM | .startupProbe.periodSeconds * .startupProbe.failureThreshold")"
 check "vllm: Hugging Face cache survives container restarts" "/root/.cache/huggingface" \
