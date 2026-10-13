@@ -100,8 +100,8 @@ jobs:
           kind load docker-image mcp-mock:ci --name chart-testing
       - name: Install
         run: |
-          # No --wait: the migrations Job is garbage-collected after 120s and
-          # Helm then fails on a healthy release.
+          # kubectl wait, not --wait: LiteLLM migrates its database on first
+          # start, which can outlast a Helm wait.
           helm install test-dependencies charts/test-dependencies \
             -n naira-deps --create-namespace \
             -f charts/test-dependencies/values-dev.yaml \

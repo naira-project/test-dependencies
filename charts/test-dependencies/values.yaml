@@ -93,7 +93,16 @@ litellm:
       resources:
         requests: {cpu: 100m, memory: 256Mi}
         limits: {cpu: 500m, memory: 512Mi}
-  migrationJob: {enabled: true}
+  # No migration Job: the proxy applies its schema itself at startup
+  # (prisma migrate deploy). litellm-helm makes the Job an Argo CD PreSync
+  # hook, which on a first sync runs before this chart's PostgreSQL exists and
+  # never finishes; its annotations value lands on the pod, not the Job, so the
+  # hook cannot be changed from here. Without the hook it is a plain Job that
+  # ttlSecondsAfterFinished deletes and Argo CD re-creates in a loop.
+  migrationJob: {enabled: false}
+  # 15 minutes (90 x 10 s) instead of 5 to finish that migration: on a busy
+  # node it timed out and restarted, and every kill restarts it from scratch.
+  startupProbe: {failureThreshold: 90}
   proxyConfigMap: {create: true, key: config.yaml}
   proxy_config:
     model_list:
@@ -247,7 +256,7 @@ servicemonitors:
 llamacpp:
   image: ghcr.io/ggml-org/llama.cpp:server
   downloadImage: curlimages/curl:8.11.1
-  storage: 3Gi        # model cache PVC, shared by all models below
+  storage: 3Gi        # model cache PVC per model; a model's `storage` overrides it
   # The download image runs unprivileged and a CSI-provisioned volume (EBS)
   # is root-owned: without fsGroup the download fails with "Permission
   # denied". kind's hostPath provisioner is world-writable and hides that.

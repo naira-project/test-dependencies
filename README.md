@@ -64,9 +64,9 @@ about 4 CPUs and 8 GiB.
    docker build -t "$IMG" images/mcp-mock && kind load docker-image "$IMG"
    ```
 
-3. Install this chart into `naira-deps`, then wait for it. Not with Helm's
-   `--wait`: the LiteLLM migrations Job is garbage-collected after 120 s and
-   Helm then fails on a healthy release.
+3. Install this chart into `naira-deps`, then wait for it. LiteLLM migrates
+   its database on first start, which can take several minutes, so the wait
+   is `kubectl wait` with a long timeout rather than Helm's `--wait`.
 
    ```sh
    helm upgrade --install test-dependencies charts/test-dependencies \
