@@ -74,16 +74,19 @@ job creates the Secret, the next pod restart picks it up automatically.
 
 ### External Secrets Operator
 
-ESO is installed with Helm into the `external-secrets` namespace by
-`make platform-openbao-up`, alongside OpenBao. Chart versions are
-`OPENBAO_CHART_VERSION` and `ESO_CHART_VERSION` in the Makefile; values are
-`values.yaml` and `eso/values.yaml` in this directory.
+ESO is a cluster prerequisite, not installed from here: test-infrastructure
+installs it with Argo CD into the `external-secrets` namespace (chart 2.11.0).
+`make platform-openbao-up` stops with an install hint if its CRDs are missing,
+e.g. on a local cluster. This directory adds what OpenBao needs from ESO: the
+`ClusterSecretStore` and a `system:auth-delegator` binding for ESO's
+ServiceAccount. OpenBao's chart version is `OPENBAO_CHART_VERSION` in the
+Makefile; its values are `values.yaml`.
 
 A single `ClusterSecretStore` named `openbao-platform` is available cluster-wide.
 Any namespace can reference it from `ExternalSecret` resources to project OpenBao
 KV v2 secrets into native Kubernetes Secrets.
 It is applied from `infrastructure/platform/openbao/eso/clustersecretstore`
-once the ESO chart, and with it the CRDs, is ready.
+(API `external-secrets.io/v1`; ESO 2.x no longer serves `v1beta1`).
 
 ESO authenticates to OpenBao via the Kubernetes auth method: it presents its own
 ServiceAccount token; OpenBao verifies it against the cluster's TokenReview API.
@@ -149,7 +152,7 @@ These commands modify cluster state. They are documented for Platform Engineers 
 should not be run by developers without understanding the implications.
 
 ```bash
-# Deploy OpenBao + ESO platform component
+# Deploy OpenBao and its ClusterSecretStore (ESO must already be installed)
 make platform-openbao-up
 
 # Initialize OpenBao (one-time per cluster lifetime)
@@ -166,7 +169,7 @@ make platform-openbao-seed FORCE=true
 # Full teardown + redeploy (destroys all secrets — use only in dev clusters)
 make platform-openbao-reset
 
-# Apply a chart version or values change (edit the Makefile or values files first)
+# Apply a chart version or values change (edit the Makefile or values.yaml first)
 make platform-openbao-upgrade
 ```
 

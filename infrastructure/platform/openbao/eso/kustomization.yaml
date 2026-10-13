@@ -1,8 +1,8 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+# External Secrets Operator itself is provided by the cluster (test-infrastructure
+# installs it with Argo CD). This directory only adds what OpenBao needs from it.
 resources:
-  - namespace.yaml
   - rbac.yaml
-  # clustersecretstore/ is NOT listed here — it requires the ESO CRDs, which
-  # the external-secrets chart installs. `make platform-openbao-up` applies it
-  # once that chart is ready.
+  # clustersecretstore/ is NOT listed here — it requires the ESO CRDs and
+  # webhook. `make platform-openbao-up` applies it once they are available.

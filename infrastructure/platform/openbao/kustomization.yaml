@@ -1,7 +1,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# Namespaces and RBAC only. The OpenBao and ESO charts are installed with Helm
-# by `make platform-openbao-up` (values.yaml, eso/values.yaml).
+# Namespace and RBAC only. The OpenBao chart is installed with Helm by
+# `make platform-openbao-up` (values.yaml).
 resources:
   - namespace.yaml
   - rbac.yaml
