@@ -14,5 +14,14 @@ dependencies:
 - name: kube-prometheus-stack
   repository: https://prometheus-community.github.io/helm-charts
   version: 91.2.0
-digest: sha256:49edb976a2a41052b17be28387c87f4a8ef946e99f8ac35cd5a66b1999840ce0
-generated: "2026-09-23T19:41:31.748814+02:00"
+- name: loki
+  repository: https://grafana.github.io/helm-charts
+  version: 7.3.0
+- name: alloy
+  repository: https://grafana.github.io/helm-charts
+  version: 1.13.0
+- name: yet-another-cloudwatch-exporter
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 0.39.1
+digest: sha256:583f761a8ff5b6675eb59cc2d6fc012917cbda5ec510a80c65ec6b3b0e65b67e
+generated: "2026-10-06T17:07:50.6389617+02:00"

@@ -11,6 +11,9 @@ inference backends, not a pair (RFC-009 §1).
 {{- if and .Values.tags.llamacpp .Values.tags.vllm }}
 {{- fail "tags.llamacpp and tags.vllm are mutually exclusive inference backends — enable one, not both" }}
 {{- end }}
+{{- if and .Values.tags.yace (not .Values.tags.monitoring) }}
+{{- fail "tags.yace needs tags.monitoring: YACE is scraped through a ServiceMonitor, a CRD kube-prometheus-stack defines" }}
+{{- end }}
 {{- if and .Values.tags.keycloak .Values.keycloak.admin.create .Values.keycloak.admin.existingSecret }}
 {{- fail "keycloak.admin: set existingSecret or create, not both" }}
 {{- end }}
