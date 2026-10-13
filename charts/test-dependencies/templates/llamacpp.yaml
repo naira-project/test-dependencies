@@ -1,22 +1,30 @@
 {{/*
-llama.cpp: one Deployment and Service per entry in llamacpp.models, sharing one
-model cache PVC. An init container downloads the model file once; later starts
+llama.cpp: one Deployment, Service and model cache PVC per entry in
+llamacpp.models. An init container downloads the model file once; later starts
 find it cached. Mutually exclusive with vLLM (validate.yaml).
+
+One PVC per model, not one shared: a ReadWriteOnce volume (EBS) attaches to one
+node, so on a multi-node cluster the second model's pod waits forever for a
+volume another node holds. For the same reason the Deployments use Recreate.
 */}}
 {{- if .Values.tags.llamacpp }}
+{{- range $i, $m := .Values.llamacpp.models }}
+{{- if $i }}
+---
+{{- end }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: llamacpp-model-cache
-  namespace: {{ .Release.Namespace }}
-  labels: {{- include "deps.labels" . | nindent 4 }}
+  name: {{ $m.name }}-model-cache
+  namespace: {{ $.Release.Namespace }}
+  labels: {{- include "deps.labels" $ | nindent 4 }}
 spec:
   accessModes: [ReadWriteOnce]
   resources:
     requests:
-      storage: {{ .Values.llamacpp.storage }}
-{{- range .Values.llamacpp.models }}
+      storage: {{ $m.storage | default $.Values.llamacpp.storage }}
 ---
+{{- with $m }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -25,6 +33,7 @@ metadata:
   labels: {{- include "deps.labels" $ | nindent 4 }}
 spec:
   replicas: 1
+  strategy: {type: Recreate}
   selector:
     matchLabels: {app: {{ .name }}}
   template:
@@ -90,7 +99,7 @@ spec:
       volumes:
         - name: model-storage
           persistentVolumeClaim:
-            claimName: llamacpp-model-cache
+            claimName: {{ .name }}-model-cache
 ---
 apiVersion: v1
 kind: Service
@@ -106,5 +115,6 @@ spec:
   selector: {app: {{ .name }}}
   ports:
     - {name: http, port: 8080, targetPort: http}
+{{- end }}
 {{- end }}
 {{- end }}

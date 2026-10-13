@@ -115,14 +115,18 @@ check "llamacpp: server exposes metrics" "true" \
   "$(render --set tags.llamacpp=true | yq "$LLAMA | .containers[0].args | contains([\"--metrics\"])")"
 check "llamacpp: fsGroup so the unprivileged downloader can write the PVC" "$(yq '.llamacpp.fsGroup' "$CHART/values.yaml")" \
   "$(render --set tags.llamacpp=true | yq "$LLAMA | .securityContext.fsGroup")"
-check "llamacpp: one shared model cache PVC" "llamacpp-model-cache" \
-  "$(render --set tags.llamacpp=true | yq ea 'select(.kind == "PersistentVolumeClaim" and (.metadata.name | test("^llama"))) | .metadata.name')"
+check "llamacpp: one model cache PVC per model" "llama-dummy-model-model-cache,llama-qwen25-05b-model-cache" \
+  "$(render --set tags.llamacpp=true | yq ea '[select(.kind == "PersistentVolumeClaim" and (.metadata.name | test("^llama"))) | .metadata.name] | sort | join(",")')"
+check "llamacpp: each Deployment mounts its own PVC" "llama-dummy-model-model-cache,llama-qwen25-05b-model-cache" \
+  "$(render --set tags.llamacpp=true | yq ea '[select(.kind == "Deployment" and (.metadata.name | test("^llama"))) | .spec.template.spec.volumes[0].persistentVolumeClaim.claimName] | sort | join(",")')"
+check "llamacpp: Recreate, so a ReadWriteOnce volume is released before the new pod starts" "Recreate" \
+  "$(render --set tags.llamacpp=true | yq ea '[select(.kind == "Deployment" and (.metadata.name | test("^llama"))) | .spec.strategy.type] | unique | join(",")')"
 check "llamacpp: Services are labelled as inference" "llama-dummy-model,llama-qwen25-05b" \
   "$(render --set tags.llamacpp=true | yq ea '[select(.kind == "Service" and .metadata.labels["app.kubernetes.io/component"] == "inference") | .metadata.name] | sort | join(",")')"
 check "llamacpp: models come from values" "llama-only" \
   "$(render --set tags.llamacpp=true --set-json 'llamacpp.models=[{"name":"llama-only","modelFile":"m.gguf","downloadUrl":"https://example.invalid/m.gguf","resources":{}}]' | yq ea 'select(.kind == "Deployment" and .metadata.name == "llama-*") | .metadata.name')"
 check "llamacpp: off by default" "" \
-  "$(render | yq ea 'select(.kind == "PersistentVolumeClaim" and .metadata.name == "llamacpp-model-cache") | .metadata.name')"
+  "$(render | yq ea 'select(.kind == "PersistentVolumeClaim" and (.metadata.name | test("model-cache$"))) | .metadata.name')"
 VLLM='select(.kind == "Deployment" and .metadata.name == "vllm") | .spec.template.spec.containers[0]'
 check "vllm: container port is vLLM's own 8000" "8000" \
   "$(render --set tags.vllm=true | yq "$VLLM | .ports[0].containerPort")"
