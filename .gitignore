@@ -1,4 +1,2 @@
-# Helm chart cache written by `kubectl kustomize --enable-helm`
-infrastructure/testbed/mlflow/charts/
 # Platform Engineering secret inputs — never commit real values
 .env.testbed
