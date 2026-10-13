@@ -113,8 +113,7 @@ litellm:
           api_base: https://api.mistral.ai/v1
   resources:
     requests: {cpu: 200m, memory: 512Mi}
-    # 1Gi is not enough — LiteLLM OOMKills on startup. component-testbed's
-    # Flux HelmRelease already carries 2Gi; this matches it.
+    # 1Gi is not enough — LiteLLM OOMKills on startup.
     limits: {memory: 2Gi}
 
 mlflow:
@@ -148,8 +147,7 @@ mlflow:
   extraArgs:
     allowed-hosts: "*"
     workers: "1"
-  # Keep BLAS from grabbing every core on a kind node — the same fix
-  # component-testbed already carries for its Flux HelmRelease.
+  # Keep BLAS from grabbing every core on a small node.
   extraEnvVars:
     OPENBLAS_NUM_THREADS: "1"
     OMP_NUM_THREADS: "1"
