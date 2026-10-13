@@ -2,8 +2,12 @@
 # OpenBao platform component
 # =============================================================================
 #
-# OpenBao and External Secrets Operator (ESO), installed with Helm. Stays in
-# this repository until it moves to test-infrastructure (Terraform).
+# OpenBao, installed with Helm, and its ClusterSecretStore. Stays in this
+# repository until it moves to test-infrastructure (Terraform).
+#
+# External Secrets Operator is a prerequisite provided by the cluster:
+# test-infrastructure installs it with Argo CD (ESO_CHART_VERSION below is
+# that version, used only in the hint for clusters without it).
 #
 # Command surfaces:
 #   platform-openbao-*   — Platform Engineering operations (init, seed, reset)
@@ -25,7 +29,7 @@ OPENBAO_SVC      := openbao-active
 OPENBAO_API_PORT := 8200
 OPENBAO_CHART_VERSION := 0.28.2
 ESO_NS           := external-secrets
-ESO_CHART_VERSION := 0.10.*
+ESO_CHART_VERSION := 2.11.0
 # Pass FORCE=true to overwrite existing secrets: make platform-openbao-seed FORCE=true
 FORCE            ?= false
 
@@ -33,13 +37,13 @@ FORCE            ?= false
         platform-openbao-reset platform-openbao-upgrade \
         testbed-openbao-status testbed-openbao-port-forward \
         testbed-openbao-seed-status testbed-openbao-inspect \
-        _openbao-helm-install _openbao-apply-clustersecretstore _openbao-wait-ready \
+        _openbao-require-eso _openbao-helm-install _openbao-apply-clustersecretstore _openbao-wait-ready \
         _openbao-reconcile-clustersecretstore _openbao-run-init \
         _openbao-run-seed _openbao-require-token
 
-## [PLATFORM] Deploy the OpenBao platform component and ESO with Helm.
-platform-openbao-up:
-	@echo ">>> Applying namespaces and RBAC..."
+## [PLATFORM] Deploy OpenBao with Helm and its ClusterSecretStore. Needs ESO.
+platform-openbao-up: _openbao-require-eso
+	@echo ">>> Applying namespace and RBAC..."
 	kubectl apply -k $(OPENBAO_DIR)/
 	$(MAKE) _openbao-helm-install
 	$(MAKE) _openbao-apply-clustersecretstore
@@ -62,17 +66,15 @@ platform-openbao-seed:
 
 ## [PLATFORM] Full teardown + redeploy from scratch. Destroys all secrets in OpenBao.
 platform-openbao-reset:
-	@echo ">>> Uninstalling Helm releases..."
+	@echo ">>> Uninstalling the OpenBao release..."
 	helm uninstall openbao -n $(OPENBAO_NS) --ignore-not-found
-	helm uninstall external-secrets -n $(ESO_NS) --ignore-not-found
 	@echo ">>> Deleting namespace $(OPENBAO_NS)..."
 	kubectl delete namespace $(OPENBAO_NS) --ignore-not-found --wait=true
-	kubectl delete namespace $(ESO_NS) --ignore-not-found --wait=true
 	@echo ">>> Redeploying..."
 	$(MAKE) platform-openbao-up
 
-## [PLATFORM] Apply a chart version or values change. Edit OPENBAO_CHART_VERSION,
-## ESO_CHART_VERSION or the values files first, then run this.
+## [PLATFORM] Apply a chart version or values change. Edit OPENBAO_CHART_VERSION
+## or values.yaml first, then run this.
 platform-openbao-upgrade: _openbao-helm-install
 	@echo "Upgrade applied. The OpenBao StatefulSet uses OnDelete; to roll the pod:"
 	@echo "  kubectl delete pod openbao-0 -n $(OPENBAO_NS)"
@@ -96,9 +98,8 @@ testbed-openbao-status:
 	kubectl get clustersecretstore openbao-platform 2>/dev/null || \
 	  echo "(ClusterSecretStore not found — ESO may still be deploying)"
 	@echo ""
-	@echo "=== Helm releases ==="
+	@echo "=== Helm release ==="
 	helm status openbao -n $(OPENBAO_NS) 2>/dev/null | head -5 || echo "(openbao release not found)"
-	helm status external-secrets -n $(ESO_NS) 2>/dev/null | head -5 || echo "(external-secrets release not found)"
 
 ## [DEVELOPER] Port-forward OpenBao API and UI to http://127.0.0.1:8200.
 testbed-openbao-port-forward:
@@ -149,13 +150,17 @@ _openbao-wait-ready:
 	@echo ">>> Waiting for OpenBao pod to be ready (may take 60–90s on first deploy)..."
 	kubectl wait pod/openbao-0 -n $(OPENBAO_NS) --for=condition=Ready --timeout=180s
 
-# ESO first and with --wait: the ClusterSecretStore needs its CRDs and webhook.
-# OpenBao without --wait: its pod is not Ready until initialized and unsealed.
+_openbao-require-eso:
+	@kubectl get crd clustersecretstores.external-secrets.io >/dev/null 2>&1 || { \
+	  echo "ERROR: External Secrets Operator is not installed (CRD clustersecretstores.external-secrets.io missing)."; \
+	  echo "  The cluster provides it; test-infrastructure installs chart $(ESO_CHART_VERSION). On a local cluster:"; \
+	  echo "    helm install external-secrets external-secrets --repo https://charts.external-secrets.io \\"; \
+	  echo "      --version $(ESO_CHART_VERSION) -n $(ESO_NS) --create-namespace --wait"; \
+	  exit 1; \
+	}
+
+# Without --wait: the OpenBao pod is not Ready until initialized and unsealed.
 _openbao-helm-install:
-	@echo ">>> Installing external-secrets $(ESO_CHART_VERSION)..."
-	helm upgrade --install external-secrets external-secrets \
-	  --repo https://charts.external-secrets.io --version '$(ESO_CHART_VERSION)' \
-	  -n $(ESO_NS) -f $(OPENBAO_DIR)/eso/values.yaml --wait --timeout 5m
 	@echo ">>> Installing openbao $(OPENBAO_CHART_VERSION)..."
 	helm upgrade --install openbao openbao \
 	  --repo https://openbao.github.io/openbao-helm --version '$(OPENBAO_CHART_VERSION)' \
