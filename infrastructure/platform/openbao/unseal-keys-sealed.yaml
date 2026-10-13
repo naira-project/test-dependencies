@@ -32,14 +32,15 @@
 #         /dev/stdin \
 #     > infrastructure/platform/openbao/unseal-keys-sealed.yaml
 #
-#   Add a .sops.yaml at the repo root to configure SOPS for automatic
-#   encryption/decryption on `kubectl apply`.
+#   `kubectl apply -k` cannot decrypt SOPS: keep a SOPS file out of
+#   kustomization.yaml and apply it with
+#     sops --decrypt unseal-keys-sealed.yaml | kubectl apply -f -
 #
 # ── After committing ─────────────────────────────────────────────────────
 #
-#   1. Add unseal-keys-sealed.yaml to resources in kustomization.yaml
+#   1. SealedSecrets: add unseal-keys-sealed.yaml to resources in kustomization.yaml
 #   2. Apply: kubectl apply -k infrastructure/platform/openbao/
-#      (Flux will decrypt and create the Secret automatically)
+#      (the SealedSecrets controller creates the Secret; SOPS: see above)
 #   3. Restart the pod: kubectl rollout restart statefulset/openbao \
 #        -n naira-platform-openbao
 #

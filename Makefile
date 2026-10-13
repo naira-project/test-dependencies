@@ -1,124 +1,9 @@
-# Flux GitRepository source name pointing to this repo.
-# Override if your GitRepository has a different name:
-#   FLUX_SOURCE=my-repo make testbed-mlflow-up
-#   FLUX_SOURCE=my-repo make platform-openbao-up
-FLUX_SOURCE ?= component-testbed
-
-# Override the target namespace for developer-owned testbed instances:
-#   NS=my-litellm make testbed-litellm-up
-#   NS=my-mlflow make testbed-mlflow-up
-NS ?=
-
-# =============================================================================
-# MLflow testbed
-# =============================================================================
-
-MLFLOW_DEFAULT_NS := naira-testbed-mlflow
-MLFLOW_NS        := $(if $(NS),$(NS),$(MLFLOW_DEFAULT_NS))
-MLFLOW_DIR       := infrastructure/testbed/mlflow
-MLFLOW_SVC       := mlflow
-MLFLOW_PORT      := 5000
-
-LITELLM_DEFAULT_NS := naira-testbed-litellm
-LITELLM_NS       := $(if $(NS),$(NS),$(LITELLM_DEFAULT_NS))
-LITELLM_DIR      := infrastructure/testbed/litellm
-LITELLM_SVC      := litellm
-LITELLM_PORT     := 4000
-
-.PHONY: testbed-mlflow-up testbed-mlflow-down testbed-mlflow-reset \
-        testbed-mlflow-status testbed-mlflow-port-forward testbed-mlflow-seed \
-        _mlflow-run-seed _mlflow-check-flux-source \
-        testbed-litellm-up testbed-litellm-down testbed-litellm-reset \
-        testbed-litellm-status testbed-litellm-port-forward testbed-litellm-smoke \
-        testbed-litellm-secret-scan \
-        _litellm-run-smoke _litellm-check-flux-source
-
-## Provision MLflow testbed: deploy + seed sample data.
-testbed-mlflow-up:
-	@$(MAKE) _mlflow-check-flux-source
-	@echo ">>> Applying Flux Kustomization..."
-	FLUX_SOURCE=$(FLUX_SOURCE) MLFLOW_NS=$(MLFLOW_NS) envsubst '$$FLUX_SOURCE $$MLFLOW_NS' < $(MLFLOW_DIR)/flux-kustomization.yaml | kubectl apply -f -
-	@echo ">>> Waiting for Flux reconciliation..."
-	kubectl wait --for=condition=ready kustomization/$(MLFLOW_NS) -n flux-system --timeout=180s
-	@echo ">>> Running seed job..."
-	$(MAKE) _mlflow-run-seed
-	@echo ""
-	@echo "MLflow testbed is up."
-	@echo "  UI:  make testbed-mlflow-port-forward  →  http://127.0.0.1:$(MLFLOW_PORT)"
-	@echo "  API: http://$(MLFLOW_SVC).$(MLFLOW_NS).svc.cluster.local:$(MLFLOW_PORT)"
-
-## Tear down MLflow testbed: delete namespace and all resources.
-testbed-mlflow-down:
-	@echo ">>> Removing Flux Kustomization..."
-	kubectl delete kustomization $(MLFLOW_NS) -n flux-system --ignore-not-found
-	@echo ">>> Uninstalling MLflow Helm release..."
-	helm uninstall $(MLFLOW_SVC) -n $(MLFLOW_NS) 2>/dev/null || true
-	@echo ">>> Deleting namespace $(MLFLOW_NS)..."
-	kubectl delete namespace $(MLFLOW_NS) --ignore-not-found --wait=true
-	@echo "MLflow testbed removed."
-
-## Full teardown + recreate from scratch.
-testbed-mlflow-reset: testbed-mlflow-down testbed-mlflow-up
-
-## Show pod status, service, and Flux reconciliation state.
-testbed-mlflow-status:
-	@echo "=== Pods ==="
-	kubectl get pods -n $(MLFLOW_NS) 2>/dev/null || echo "(namespace not found)"
-	@echo ""
-	@echo "=== Services ==="
-	kubectl get svc -n $(MLFLOW_NS) 2>/dev/null || true
-	@echo ""
-	@echo "=== PVCs ==="
-	kubectl get pvc -n $(MLFLOW_NS) 2>/dev/null || true
-	@echo ""
-	@echo "=== Helm release ==="
-	helm status $(MLFLOW_SVC) -n $(MLFLOW_NS) 2>/dev/null || echo "(Helm release not found)"
-	@echo ""
-	@echo "=== Flux Kustomization ==="
-	kubectl get kustomization $(MLFLOW_NS) -n flux-system 2>/dev/null || echo "(Flux Kustomization not found — run 'NS=$(MLFLOW_NS) make testbed-mlflow-up' to enable Flux reconciliation)"
-
-## Open kubectl port-forward to http://127.0.0.1:5000.
-testbed-mlflow-port-forward:
-	@echo ">>> Forwarding http://127.0.0.1:$(MLFLOW_PORT) → svc/$(MLFLOW_SVC):$(MLFLOW_PORT)"
-	@echo "    Press Ctrl+C to stop."
-	kubectl port-forward svc/$(MLFLOW_SVC) $(MLFLOW_PORT):$(MLFLOW_PORT) -n $(MLFLOW_NS)
-
-## Re-run the seed job without redeploying MLflow (idempotent).
-testbed-mlflow-seed:
-	$(MAKE) _mlflow-run-seed
-
-# --- internal targets ---
-
-_mlflow-check-flux-source:
-	@kubectl get gitrepository $(FLUX_SOURCE) -n flux-system >/dev/null 2>&1 || { \
-		echo "ERROR: Flux GitRepository '$(FLUX_SOURCE)' was not found in namespace 'flux-system'."; \
-		echo ""; \
-		echo "make testbed-mlflow-up applies a Flux Kustomization that expects an existing"; \
-		echo "GitRepository source pointing at this repository."; \
-		echo ""; \
-		echo "Fix one of these first:"; \
-		echo "  1. Reuse an existing Flux source:"; \
-		echo "     FLUX_SOURCE=<existing-gitrepository> make testbed-mlflow-up"; \
-		echo "  2. Create a Flux source for this repo in flux-system, for example:"; \
-		echo "     flux create source git $(FLUX_SOURCE) --url=<repo-url> --branch=<branch> --namespace=flux-system"; \
-		echo ""; \
-		echo "You can inspect available sources with:"; \
-		echo "  kubectl get gitrepositories -n flux-system"; \
-		exit 1; \
-	}
-
-_mlflow-run-seed:
-	@echo ">>> Deleting previous seed job (if any)..."
-	kubectl delete job mlflow-seed -n $(MLFLOW_NS) --ignore-not-found
-	@echo ">>> Applying seed job..."
-	MLFLOW_NS=$(MLFLOW_NS) envsubst '$$MLFLOW_NS' < $(MLFLOW_DIR)/seed-job.yaml | kubectl apply -n $(MLFLOW_NS) -f -
-	@echo ">>> Waiting for seed job to complete..."
-	kubectl wait --for=condition=complete job/mlflow-seed -n $(MLFLOW_NS) --timeout=120s
-	@echo ">>> Seed job finished."
-
 # =============================================================================
 # OpenBao platform component
 # =============================================================================
+#
+# OpenBao and External Secrets Operator (ESO), installed with Helm. Stays in
+# this repository until it moves to test-infrastructure (Terraform).
 #
 # Command surfaces:
 #   platform-openbao-*   — Platform Engineering operations (init, seed, reset)
@@ -127,7 +12,7 @@ _mlflow-run-seed:
 # Typical first-time setup:
 #   make platform-openbao-up
 #   make platform-openbao-init       # once per cluster lifetime
-#   # encrypt unseal-keys-sealed.yaml, commit, kubectl apply -k
+#   # seal unseal-keys-sealed.yaml, commit, kubectl apply -k
 #   make platform-openbao-seed
 #
 # Subsequent re-seeds (e.g. after adding new API keys to .env.testbed):
@@ -138,6 +23,9 @@ OPENBAO_DIR      := infrastructure/platform/openbao
 OPENBAO_STORE_DIR := $(OPENBAO_DIR)/eso/clustersecretstore
 OPENBAO_SVC      := openbao-active
 OPENBAO_API_PORT := 8200
+OPENBAO_CHART_VERSION := 0.28.2
+ESO_NS           := external-secrets
+ESO_CHART_VERSION := 0.10.*
 # Pass FORCE=true to overwrite existing secrets: make platform-openbao-seed FORCE=true
 FORCE            ?= false
 
@@ -145,22 +33,16 @@ FORCE            ?= false
         platform-openbao-reset platform-openbao-upgrade \
         testbed-openbao-status testbed-openbao-port-forward \
         testbed-openbao-seed-status testbed-openbao-inspect \
-        _openbao-apply-flux-kustomization _openbao-wait-ready _openbao-wait-eso-ready \
+        _openbao-helm-install _openbao-apply-clustersecretstore _openbao-wait-ready \
         _openbao-reconcile-clustersecretstore _openbao-run-init \
         _openbao-run-seed _openbao-require-token
 
-## [PLATFORM] Deploy the OpenBao platform component and ESO via Flux/Kustomize.
+## [PLATFORM] Deploy the OpenBao platform component and ESO with Helm.
 platform-openbao-up:
-	@echo ">>> Applying OpenBao platform manifests (namespaces, HelmReleases, RBAC)..."
+	@echo ">>> Applying namespaces and RBAC..."
 	kubectl apply -k $(OPENBAO_DIR)/
-	$(MAKE) _openbao-apply-flux-kustomization
-	@echo ">>> Waiting for ESO CRDs to be installed by Flux Helm controller..."
-	@until kubectl get crd clustersecretstores.external-secrets.io >/dev/null 2>&1; do \
-	  echo "    ... waiting for clustersecretstores CRD"; sleep 5; \
-	done
-	$(MAKE) _openbao-wait-eso-ready
-	@echo ">>> Applying ClusterSecretStore (requires ESO CRDs)..."
-	kubectl apply -f $(OPENBAO_STORE_DIR)/clustersecretstore.yaml
+	$(MAKE) _openbao-helm-install
+	$(MAKE) _openbao-apply-clustersecretstore
 	@echo ""
 	@echo "OpenBao platform component applied."
 	@echo "  OpenBao will start but remain sealed until you run:"
@@ -180,20 +62,20 @@ platform-openbao-seed:
 
 ## [PLATFORM] Full teardown + redeploy from scratch. Destroys all secrets in OpenBao.
 platform-openbao-reset:
+	@echo ">>> Uninstalling Helm releases..."
+	helm uninstall openbao -n $(OPENBAO_NS) --ignore-not-found
+	helm uninstall external-secrets -n $(ESO_NS) --ignore-not-found
 	@echo ">>> Deleting namespace $(OPENBAO_NS)..."
 	kubectl delete namespace $(OPENBAO_NS) --ignore-not-found --wait=true
-	kubectl delete namespace external-secrets --ignore-not-found --wait=true
+	kubectl delete namespace $(ESO_NS) --ignore-not-found --wait=true
 	@echo ">>> Redeploying..."
 	$(MAKE) platform-openbao-up
 
-## [PLATFORM] Update OpenBao chart version. Edit helmrelease-openbao.yaml first, then run this.
-platform-openbao-upgrade:
-	@echo ">>> Applying updated HelmRelease..."
-	kubectl apply -f $(OPENBAO_DIR)/helmrelease-openbao.yaml
-	@echo ">>> Triggering Flux reconciliation (if Flux is running)..."
-	kubectl annotate helmrelease openbao -n $(OPENBAO_NS) \
-	  reconcile.fluxcd.io/requestedAt="$$(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>/dev/null || true
-	@echo "OpenBao upgrade triggered."
+## [PLATFORM] Apply a chart version or values change. Edit OPENBAO_CHART_VERSION,
+## ESO_CHART_VERSION or the values files first, then run this.
+platform-openbao-upgrade: _openbao-helm-install
+	@echo "Upgrade applied. The OpenBao StatefulSet uses OnDelete; to roll the pod:"
+	@echo "  kubectl delete pod openbao-0 -n $(OPENBAO_NS)"
 
 ## [DEVELOPER] Show OpenBao platform component status.
 testbed-openbao-status:
@@ -214,9 +96,9 @@ testbed-openbao-status:
 	kubectl get clustersecretstore openbao-platform 2>/dev/null || \
 	  echo "(ClusterSecretStore not found — ESO may still be deploying)"
 	@echo ""
-	@echo "=== Flux Kustomization ==="
-	kubectl get kustomization naira-platform-openbao -n flux-system 2>/dev/null || \
-	  echo "(Flux Kustomization not found — apply $(OPENBAO_DIR)/flux-kustomization.yaml)"
+	@echo "=== Helm releases ==="
+	helm status openbao -n $(OPENBAO_NS) 2>/dev/null | head -5 || echo "(openbao release not found)"
+	helm status external-secrets -n $(ESO_NS) 2>/dev/null | head -5 || echo "(external-secrets release not found)"
 
 ## [DEVELOPER] Port-forward OpenBao API and UI to http://127.0.0.1:8200.
 testbed-openbao-port-forward:
@@ -267,38 +149,26 @@ _openbao-wait-ready:
 	@echo ">>> Waiting for OpenBao pod to be ready (may take 60–90s on first deploy)..."
 	kubectl wait pod/openbao-0 -n $(OPENBAO_NS) --for=condition=Ready --timeout=180s
 
-_openbao-apply-flux-kustomization:
-	@echo ">>> Applying Flux Kustomization CR (optional — requires a Ready Flux source)..."
-	@ready=$$(kubectl get gitrepository $(FLUX_SOURCE) -n flux-system \
-	  -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true); \
-	if [ "$$ready" = "True" ]; then \
-	  FLUX_SOURCE=$(FLUX_SOURCE) envsubst < $(OPENBAO_DIR)/flux-kustomization.yaml | kubectl apply -f -; \
-	  FLUX_SOURCE=$(FLUX_SOURCE) envsubst < $(OPENBAO_DIR)/flux-kustomization-secretstore.yaml | kubectl apply -f -; \
-	else \
-	  echo "    (Flux source '$(FLUX_SOURCE)' is not Ready — manifests applied directly above)"; \
-	  echo "    To enable Flux reconciliation, fix or override FLUX_SOURCE and re-run this target."; \
-	fi
+# ESO first and with --wait: the ClusterSecretStore needs its CRDs and webhook.
+# OpenBao without --wait: its pod is not Ready until initialized and unsealed.
+_openbao-helm-install:
+	@echo ">>> Installing external-secrets $(ESO_CHART_VERSION)..."
+	helm upgrade --install external-secrets external-secrets \
+	  --repo https://charts.external-secrets.io --version '$(ESO_CHART_VERSION)' \
+	  -n $(ESO_NS) -f $(OPENBAO_DIR)/eso/values.yaml --wait --timeout 5m
+	@echo ">>> Installing openbao $(OPENBAO_CHART_VERSION)..."
+	helm upgrade --install openbao openbao \
+	  --repo https://openbao.github.io/openbao-helm --version '$(OPENBAO_CHART_VERSION)' \
+	  -n $(OPENBAO_NS) -f $(OPENBAO_DIR)/values.yaml
 
-_openbao-wait-eso-ready:
-	@echo ">>> Waiting for ESO webhook to become reachable..."
-	@until kubectl get helmrelease external-secrets -n external-secrets >/dev/null 2>&1; do \
-	  echo "    ... waiting for external-secrets HelmRelease"; sleep 5; \
-	done
-	kubectl wait helmrelease/external-secrets -n external-secrets \
-	  --for=condition=Ready --timeout=180s
-	@until kubectl get deployment external-secrets-webhook -n external-secrets >/dev/null 2>&1; do \
-	  echo "    ... waiting for external-secrets-webhook Deployment"; sleep 5; \
-	done
-	kubectl wait deployment/external-secrets-webhook -n external-secrets \
-	  --for=condition=Available --timeout=180s
-	@until kubectl get service external-secrets-webhook -n external-secrets >/dev/null 2>&1; do \
-	  echo "    ... waiting for external-secrets-webhook Service"; sleep 5; \
-	done
-	@until [ -n "$$(kubectl get endpointslice -n external-secrets \
-	  -l kubernetes.io/service-name=external-secrets-webhook \
-	  -o jsonpath='{.items[*].endpoints[*].addresses[*]}' 2>/dev/null)" ]; do \
-	  echo "    ... waiting for external-secrets-webhook EndpointSlice"; sleep 5; \
-	done
+# Retried: the webhook Deployment can be Available before its Service has
+# endpoints, and the apply is rejected until it does.
+_openbao-apply-clustersecretstore:
+	@echo ">>> Applying ClusterSecretStore..."
+	@for i in $$(seq 1 30); do \
+	  kubectl apply -k $(OPENBAO_STORE_DIR) && exit 0; \
+	  echo "    ... ESO webhook not ready yet, retrying"; sleep 5; \
+	done; exit 1
 
 _openbao-reconcile-clustersecretstore:
 	@echo ">>> Reconciling ClusterSecretStore after OpenBao auth changes..."
@@ -350,93 +220,3 @@ _openbao-run-seed:
 	kubectl delete secret openbao-seed-input -n $(OPENBAO_NS) --ignore-not-found
 	$(MAKE) _openbao-reconcile-clustersecretstore
 	@echo ">>> Seed job finished."
-
-## Provision LiteLLM testbed: deploy via Flux + run smoke test.
-testbed-litellm-up:
-	@$(MAKE) _litellm-check-flux-source
-	@echo ">>> Applying Flux Kustomization..."
-	FLUX_SOURCE=$(FLUX_SOURCE) LITELLM_NS=$(LITELLM_NS) envsubst '$$FLUX_SOURCE $$LITELLM_NS' < $(LITELLM_DIR)/flux-kustomization.yaml | kubectl apply -f -
-	@echo ">>> Waiting for Flux reconciliation..."
-	kubectl wait --for=condition=ready kustomization/$(LITELLM_NS) -n flux-system --timeout=300s
-	@echo ">>> Running LiteLLM smoke test..."
-	$(MAKE) _litellm-run-smoke
-	@echo ""
-	@echo "LiteLLM testbed is up."
-	@echo "  API: make testbed-litellm-port-forward  ->  http://127.0.0.1:$(LITELLM_PORT)"
-	@echo "  In cluster: http://$(LITELLM_SVC).$(LITELLM_NS).svc.cluster.local:$(LITELLM_PORT)"
-
-## Tear down LiteLLM testbed: delete namespace and all resources.
-testbed-litellm-down:
-	@echo ">>> Removing Flux Kustomization..."
-	kubectl delete kustomization $(LITELLM_NS) -n flux-system --ignore-not-found
-	@echo ">>> Uninstalling LiteLLM Helm release..."
-	helm uninstall $(LITELLM_SVC) -n $(LITELLM_NS) 2>/dev/null || true
-	@echo ">>> Deleting namespace $(LITELLM_NS)..."
-	kubectl delete namespace $(LITELLM_NS) --ignore-not-found --wait=true
-	@echo "LiteLLM testbed removed."
-
-## Full teardown + recreate from scratch.
-testbed-litellm-reset: testbed-litellm-down testbed-litellm-up
-
-## Show pod status, service, ExternalSecret, Helm release, and Flux state.
-testbed-litellm-status:
-	@echo "=== Pods ==="
-	kubectl get pods -n $(LITELLM_NS) 2>/dev/null || echo "(namespace not found)"
-	@echo ""
-	@echo "=== Services ==="
-	kubectl get svc -n $(LITELLM_NS) 2>/dev/null || true
-	@echo ""
-	@echo "=== ExternalSecret ==="
-	kubectl get externalsecret litellm-mistral-api-key -n $(LITELLM_NS) 2>/dev/null || echo "(ExternalSecret not found)"
-	@echo ""
-	@echo "=== OCI source ==="
-	kubectl get ocirepository litellm -n flux-system 2>/dev/null || echo "(OCIRepository not found)"
-	@echo ""
-	@echo "=== Helm release ==="
-	helm status $(LITELLM_SVC) -n $(LITELLM_NS) 2>/dev/null || echo "(Helm release not found)"
-	@echo ""
-	@echo "=== Flux Kustomization ==="
-	kubectl get kustomization $(LITELLM_NS) -n flux-system 2>/dev/null || echo "(Flux Kustomization not found — apply $(LITELLM_DIR)/flux-kustomization.yaml to enable Flux reconciliation)"
-
-## Open kubectl port-forward to http://127.0.0.1:4000.
-testbed-litellm-port-forward:
-	@echo ">>> Forwarding http://127.0.0.1:$(LITELLM_PORT) -> svc/$(LITELLM_SVC):$(LITELLM_PORT)"
-	@echo "    Press Ctrl+C to stop."
-	kubectl port-forward svc/$(LITELLM_SVC) $(LITELLM_PORT):$(LITELLM_PORT) -n $(LITELLM_NS)
-
-## Run chat + embeddings smoke test through LiteLLM.
-testbed-litellm-smoke:
-	$(MAKE) _litellm-run-smoke
-
-## Check LiteLLM manifests for plaintext API key values.
-testbed-litellm-secret-scan:
-	@echo ">>> Checking $(LITELLM_DIR) for plaintext LiteLLM API keys..."
-	@awk '/api_key:/ && $$0 !~ /os.environ\// { print FILENAME ":" FNR ":" $$0; found=1 } END { exit found }' $(LITELLM_DIR)/*.yaml
-	@echo "No plaintext LiteLLM api_key values found."
-
-_litellm-check-flux-source:
-	@kubectl get gitrepository $(FLUX_SOURCE) -n flux-system >/dev/null 2>&1 || { \
-		echo "ERROR: Flux GitRepository '$(FLUX_SOURCE)' was not found in namespace 'flux-system'."; \
-		echo ""; \
-		echo "make testbed-litellm-up applies a Flux Kustomization that expects an existing"; \
-		echo "GitRepository source pointing at this repository."; \
-		echo ""; \
-		echo "Fix one of these first:"; \
-		echo "  1. Reuse an existing Flux source:"; \
-		echo "     FLUX_SOURCE=<existing-gitrepository> make testbed-litellm-up"; \
-		echo "  2. Create a Flux source for this repo in flux-system, for example:"; \
-		echo "     flux create source git $(FLUX_SOURCE) --url=<repo-url> --branch=<branch> --namespace=flux-system"; \
-		echo ""; \
-		echo "You can inspect available sources with:"; \
-		echo "  kubectl get gitrepositories -n flux-system"; \
-		exit 1; \
-	}
-
-_litellm-run-smoke:
-	@echo ">>> Deleting previous smoke test job (if any)..."
-	kubectl delete job litellm-smoke-test -n $(LITELLM_NS) --ignore-not-found
-	@echo ">>> Applying smoke test job..."
-	LITELLM_NS=$(LITELLM_NS) envsubst '$$LITELLM_NS' < $(LITELLM_DIR)/smoke-test-job.yaml | kubectl apply -n $(LITELLM_NS) -f -
-	@echo ">>> Waiting for smoke test to complete..."
-	kubectl wait --for=condition=complete job/litellm-smoke-test -n $(LITELLM_NS) --timeout=180s
-	@echo ">>> Smoke test finished."
