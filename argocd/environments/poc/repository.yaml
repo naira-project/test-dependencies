@@ -1,7 +1,7 @@
-# Chart registry for the PoC. TLS with a self-signed cert whose CA is loaded
-# into argocd-tls-certs-cm by the PoC scripts (deploy/poc/, including
-# poc/certs) in the naira repo's feat/rfc-009-deployment-consolidation
-# branch — see README.md in this directory.
+# Chart repositories for the PoC. naira comes from ghcr. test-dependencies
+# comes from the PoC registry until its chart is published to ghcr: TLS with a
+# self-signed cert whose CA must be in argocd-tls-certs-cm — see README.md in
+# this directory.
 #
 # Why TLS at all for a throwaway registry: ArgoCD 3.5.2 did not honour
 # insecureOCIForceHttp against a plain-HTTP OCI registry — every pull went out
@@ -14,16 +14,16 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: naira-poc-chart-naira
+  name: naira-chart-ghcr
   namespace: argocd
   labels:
     argocd.argoproj.io/secret-type: repository
 stringData:
+  # Released naira chart. Public package: no credentials, real TLS.
   type: helm
-  name: naira-poc-chart-naira
-  url: oci://naira-poc-registry-tls:5000/charts/naira
+  name: naira-chart-ghcr
+  url: oci://ghcr.io/naira-project/charts/naira
   enableOCI: "true"
-  insecure: "true"
 ---
 apiVersion: v1
 kind: Secret

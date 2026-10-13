@@ -9,29 +9,18 @@ metadata:
 spec:
   project: naira
   source:
-    repoURL: oci://naira-poc-registry-tls:5000/charts/naira
+    # The released chart on ghcr. Its default image registry is
+    # ghcr.io/naira-project, where every image it references is published
+    # (tag v0.1.1, amd64 and arm64), so nothing is side-loaded.
+    repoURL: oci://ghcr.io/naira-project/charts/naira
     chart: naira
-    targetRevision: 0.1.0-poc
+    targetRevision: 0.1.1
     helm:
+      # Keys of naira chart 0.1.1 (deploy/charts/naira/values.yaml). Its
+      # defaults already address the test-dependencies release in naira-deps
+      # (Keycloak, LiteLLM, MLflow, MCP) and a port-forwarded browser on
+      # localhost, so only the Secrets are set here.
       valuesObject:
-        global:
-          imageRegistry: naira-poc-registry:5000
-        dependencies:
-          keycloak:
-            baseUrl: http://keycloak.naira-deps.svc.cluster.local:8080
-            realm: naira
-            issuer: http://localhost:8080/realms/naira
-            authUrl: http://localhost:8080/realms/naira/protocol/openid-connect/auth
-            baseDomain: localhost
-          litellm:
-            baseUrl: http://litellm.naira-deps.svc.cluster.local:4000
-          mlflow:
-            baseUrl: http://mlflow.naira-deps.svc.cluster.local:5000
-          openmetadata:
-            baseUrl: http://openmetadata.naira-deps.svc.cluster.local:8585
-            adminEmail: admin@open-metadata.org
-          mcp:
-            endpoints: mock-knowledge-base=http://mcp-mock.naira-deps.svc.cluster.local:8080/mcp
         catalog:
           # PoC only. Every other path supplies this as an ExternalSecret.
           secret:
@@ -39,6 +28,10 @@ spec:
             data:
               LITELLM_API_KEY: sk-local-litellm
               OPENMETADATA_ADMIN_PASSWORD: admin
+          plugins:
+            openmetadata:
+              # tags.openmetadata is off in poc/test-dependencies.yaml.
+              enabled: false
         portal:
           oidc:
             secret:
