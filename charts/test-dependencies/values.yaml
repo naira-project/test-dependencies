@@ -282,7 +282,9 @@ llamacpp:
         limits: {cpu: 200m, memory: 128Mi}
 
 vllm:
-  image: vllm/vllm-openai-cpu:latest
+  # Pinned: `latest` moves. v0.31.0 is the multi-arch index latest pointed to
+  # on 2026-10-13; the digest makes the tag immutable here.
+  image: vllm/vllm-openai-cpu:v0.31.0@sha256:495c84fe30f3572b83a78100a1e8ba423dbb77fc532ecefebe114e6b77327bd9
   model: facebook/opt-125m
   servedModelName: opt-125m
   kvCacheSpace: "1"   # GiB of CPU KV cache
