@@ -254,7 +254,10 @@ servicemonitors:
   catalogPort: 8090
 
 llamacpp:
-  image: ghcr.io/ggml-org/llama.cpp:server
+  # Pinned by digest: `server` is a moving tag, and one cluster ran two
+  # different builds under it (2026-10-13). This digest (multi-arch index) is
+  # the build verified on the sandbox; bump it deliberately.
+  image: ghcr.io/ggml-org/llama.cpp:server@sha256:c789283572ba78c2699b8945a96e654c850f938a717883f2e6187a14adac698f
   downloadImage: curlimages/curl:8.11.1
   storage: 3Gi        # model cache PVC per model; a model's `storage` overrides it
   # The download image runs unprivileged and a CSI-provisioned volume (EBS)
