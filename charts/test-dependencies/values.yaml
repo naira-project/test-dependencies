@@ -157,14 +157,15 @@ mlflowStorage: 1Gi
 
 mcpMock:
   # Test double backing the catalog's mcp-servers plugin. Never in a release.
-  # Source: images/mcp-mock; published by .github/workflows/mcp-mock-image.yml
-  # as <appVersion> and sha-<commit>; a published appVersion tag is immutable.
+  # Source: images/mcp-mock; published for amd64 and arm64 by
+  # .github/workflows/mcp-mock-image.yml as <appVersion>, sha-<commit>, main
+  # and latest; a published appVersion tag is immutable.
   image:
     registry: ghcr.io/naira-project
     repository: test-dependencies/mcp-mock
     tag: ""           # default: the chart's appVersion
-  # ghcr packages are private until made public. Then the cluster needs a
-  # docker-registry Secret (read:packages) in this namespace, named here.
+  # ghcr packages are private until made public. Until then the cluster needs
+  # a docker-registry Secret (read:packages) in this namespace, named here.
   imagePullSecrets: []   # e.g. [{name: ghcr-pull}]
   port: 8080
   resources:
