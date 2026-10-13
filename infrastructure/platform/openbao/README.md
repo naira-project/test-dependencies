@@ -27,14 +27,15 @@ Engineering team and consumed by every plugin via External Secrets Operator (ESO
 
 ### What OpenBao is (in this repo)
 
-- **Always running** alongside the cluster, kgateway, Platform Mesh, and Flux
+- **Always running** alongside the cluster, kgateway and Platform Mesh
 - **Owned by Platform Engineering** — not provisioned or operated by application developers
 - **A hard prerequisite** of every testbed and every plugin that reads secrets
 - **Bootstrapped once** per test environment; upgraded as a platform operation
 
 ### What OpenBao is not
 
-- A testbed like LiteLLM or MLflow (those are spun up per-developer)
+- A component of the test-dependencies chart (LiteLLM, MLflow, ...); it is installed
+  separately because it bootstraps the secrets that chart's consumers read
 - Anything production — this deployment is explicitly test-environment-only
 
 ### Who does what
@@ -73,14 +74,16 @@ job creates the Secret, the next pod restart picks it up automatically.
 
 ### External Secrets Operator
 
-ESO is deployed in the `external-secrets` namespace via a Flux HelmRelease alongside
-OpenBao. It is part of the same platform Kustomization.
+ESO is installed with Helm into the `external-secrets` namespace by
+`make platform-openbao-up`, alongside OpenBao. Chart versions are
+`OPENBAO_CHART_VERSION` and `ESO_CHART_VERSION` in the Makefile; values are
+`values.yaml` and `eso/values.yaml` in this directory.
 
 A single `ClusterSecretStore` named `openbao-platform` is available cluster-wide.
 Any namespace can reference it from `ExternalSecret` resources to project OpenBao
 KV v2 secrets into native Kubernetes Secrets.
-It is reconciled from `infrastructure/platform/openbao/eso/clustersecretstore`
-after the ESO CRDs are available.
+It is applied from `infrastructure/platform/openbao/eso/clustersecretstore`
+once the ESO chart, and with it the CRDs, is ready.
 
 ESO authenticates to OpenBao via the Kubernetes auth method: it presents its own
 ServiceAccount token; OpenBao verifies it against the cluster's TokenReview API.
@@ -124,7 +127,7 @@ secret/
 These commands are safe for any developer to run at any time.
 
 ```bash
-# Show pod status, seal status, ClusterSecretStore, and Flux state
+# Show pod status, seal status, ClusterSecretStore, and Helm releases
 make testbed-openbao-status
 
 # Port-forward OpenBao UI and API to http://127.0.0.1:8200
@@ -163,7 +166,7 @@ make platform-openbao-seed FORCE=true
 # Full teardown + redeploy (destroys all secrets — use only in dev clusters)
 make platform-openbao-reset
 
-# Update chart version (edit helmrelease-openbao.yaml first)
+# Apply a chart version or values change (edit the Makefile or values files first)
 make platform-openbao-upgrade
 ```
 
@@ -217,7 +220,11 @@ make platform-openbao-upgrade
      > infrastructure/platform/openbao/unseal-keys-sealed.yaml
    ```
 
-   Then add `unseal-keys-sealed.yaml` to `kustomization.yaml` resources and commit:
+   `kubectl apply -k` cannot decrypt SOPS, so a SOPS file stays out of
+   `kustomization.yaml` and is applied with
+   `sops --decrypt infrastructure/platform/openbao/unseal-keys-sealed.yaml | kubectl apply -f -`.
+
+   With SealedSecrets, add `unseal-keys-sealed.yaml` to `kustomization.yaml` resources. Then commit:
 
    ```bash
    git add infrastructure/platform/openbao/unseal-keys-sealed.yaml
@@ -268,7 +275,8 @@ If the cluster control plane was wiped but the OpenBao persistent volume was
 preserved:
 
 1. Re-apply the platform manifests: `make platform-openbao-up`
-2. Flux (or manual `kubectl apply`) decrypts and recreates `openbao-unseal-keys`
+2. The SealedSecrets controller recreates `openbao-unseal-keys` (SOPS: apply it with
+   `sops --decrypt ... | kubectl apply -f -`)
 3. Pod starts → unsealer sidecar reads key → unseals automatically
 4. Re-run seed: `make platform-openbao-seed`
 
