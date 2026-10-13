@@ -119,8 +119,8 @@ check "llamacpp: one model cache PVC per model" "llama-dummy-model-model-cache,l
   "$(render --set tags.llamacpp=true | yq ea '[select(.kind == "PersistentVolumeClaim" and (.metadata.name | test("^llama"))) | .metadata.name] | sort | join(",")')"
 check "llamacpp: each Deployment mounts its own PVC" "llama-dummy-model-model-cache,llama-qwen25-05b-model-cache" \
   "$(render --set tags.llamacpp=true | yq ea '[select(.kind == "Deployment" and (.metadata.name | test("^llama"))) | .spec.template.spec.volumes[0].persistentVolumeClaim.claimName] | sort | join(",")')"
-check "llamacpp: Recreate, so a ReadWriteOnce volume is released before the new pod starts" "Recreate" \
-  "$(render --set tags.llamacpp=true | yq ea '[select(.kind == "Deployment" and (.metadata.name | test("^llama"))) | .spec.strategy.type] | unique | join(",")')"
+check "llamacpp: maxSurge 0, so a ReadWriteOnce volume is released before the new pod starts" "RollingUpdate/0/1" \
+  "$(render --set tags.llamacpp=true | yq ea '[select(.kind == "Deployment" and (.metadata.name | test("^llama"))) | .spec.strategy | .type + "/" + (.rollingUpdate.maxSurge | tostring) + "/" + (.rollingUpdate.maxUnavailable | tostring)] | unique | join(",")')"
 check "llamacpp: Services are labelled as inference" "llama-dummy-model,llama-qwen25-05b" \
   "$(render --set tags.llamacpp=true | yq ea '[select(.kind == "Service" and .metadata.labels["app.kubernetes.io/component"] == "inference") | .metadata.name] | sort | join(",")')"
 check "llamacpp: models come from values" "llama-only" \

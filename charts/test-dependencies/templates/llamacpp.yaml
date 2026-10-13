@@ -5,7 +5,10 @@ find it cached. Mutually exclusive with vLLM (validate.yaml).
 
 One PVC per model, not one shared: a ReadWriteOnce volume (EBS) attaches to one
 node, so on a multi-node cluster the second model's pod waits forever for a
-volume another node holds. For the same reason the Deployments use Recreate.
+volume another node holds. For the same reason a rollout stops the old pod
+before starting the new one (maxSurge 0). That is RollingUpdate, not Recreate:
+switching an existing Deployment to Recreate fails under server-side apply
+(Argo CD), which keeps the API server's defaulted rollingUpdate block.
 */}}
 {{- if .Values.tags.llamacpp }}
 {{- range $i, $m := .Values.llamacpp.models }}
@@ -33,7 +36,9 @@ metadata:
   labels: {{- include "deps.labels" $ | nindent 4 }}
 spec:
   replicas: 1
-  strategy: {type: Recreate}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 0, maxUnavailable: 1}
   selector:
     matchLabels: {app: {{ .name }}}
   template:
