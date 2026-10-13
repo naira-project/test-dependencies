@@ -43,6 +43,30 @@ secrets:
   # (yace.aws.secret.name). Never put the values in a file: pass them at install,
   # --set secrets.yaceAws.accessKey=$AWS_ACCESS_KEY_ID ... Default: the operator
   # supplies the Secret.
+  #
+  # This chart does not create the keys, it only copies them into the Secret. Create a dedicated IAM user (no console access) in AWS,
+  # attach the read-only policy below, then IAM > user > Security credentials >
+  # Create access key. AWS shows the secret key once, so store it then. With
+  # create: true the keys sit in the Secret only base64-encoded: development
+  # only. In a shared environment keep create: false and supply the Secret
+  # (e.g. an ExternalSecret).
+  #
+  # Access needed: read-only CloudWatch metrics, nothing else (YACE reads
+  # AWS/Bedrock only and never changes anything). CloudWatch read actions do not
+  # support resource-level restrictions, hence Resource "*".
+  #   {
+  #     "Version": "2012-10-17",
+  #     "Statement": [{
+  #       "Sid": "YaceCloudWatchRead",
+  #       "Effect": "Allow",
+  #       "Action": [
+  #         "cloudwatch:ListMetrics",
+  #         "cloudwatch:GetMetricData",
+  #         "cloudwatch:GetMetricStatistics"
+  #       ],
+  #       "Resource": "*"
+  #     }]
+  #   }
   yaceAws:
     create: false
     accessKey: ""
