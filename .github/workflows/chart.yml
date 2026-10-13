@@ -6,10 +6,10 @@ name: Chart
 on:
   pull_request:
     branches: [main]
-    paths: ["charts/**", "argocd/**", "images/**", "ct.yaml", ".github/workflows/chart.yml"]
+    paths: ["charts/**", "images/**", "ct.yaml", ".github/workflows/chart.yml"]
   push:
     branches: [main]
-    paths: ["charts/**", "argocd/**", "images/**", "ct.yaml", ".github/workflows/chart.yml"]
+    paths: ["charts/**", "images/**", "ct.yaml", ".github/workflows/chart.yml"]
   workflow_dispatch:
 
 permissions:

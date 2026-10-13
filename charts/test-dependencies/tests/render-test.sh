@@ -74,7 +74,7 @@ check "dev: masterkey Secret created" "sk-local-litellm" \
 check "dev: provider keys Secret created" "litellm-provider-keys" \
   "$(render "${DEV[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "litellm-provider-keys") | .metadata.name')"
 n=$(render "${DEV[@]}" | grep -c 'naira-poc-registry' || true)   # grep exits 1 on no match
-check "dev: no image points at the PoC registry" "0" "${n:-0}"
+check "dev: no image points at the ci/poc-values.yaml registry" "0" "${n:-0}"
 a=$(mktemp); b=$(mktemp); render "${DEV[@]}" > "$a"; render "${DEV[@]}" > "$b"
 check "dev: two renders are identical" "yes" "$(cmp -s "$a" "$b" && echo yes || echo no)"
 rm -f "$a" "$b"
@@ -187,13 +187,11 @@ check "dev+openmetadata: openmetadata seed Job" "seed-mlflow-1,seed-openmetadata
 check "seed: none for a component that is off" "" \
   "$(render "${DEV[@]}" --set tags.mlflow=false | yq ea 'select(.kind == "Job" and (.metadata.name | test("^seed-"))) | .metadata.name')"
 
-# The ArgoCD PoC Application must keep rendering against this chart's guards
-# (its valuesObject drifted from the chart once already).
-POC="$CHART/../../argocd/environments/poc/test-dependencies.yaml"
-poc_values=$(mktemp); yq '.spec.source.helm.valuesObject' "$POC" > "$poc_values"
-poc_vf=$(yq '.spec.source.helm.valueFiles[0] // ""' "$POC")
-check "argocd PoC Application values render" "ok" \
-  "$(helm template poc "$CHART" --namespace naira-deps ${poc_vf:+-f "$CHART/$poc_vf"} -f "$poc_values" >/dev/null 2>&1 && echo ok || echo "FAILED to render")"
-rm -f "$poc_values"
+# Every ci/ fixture must keep rendering against this chart's guards (the PoC
+# values drifted from the chart once already).
+for f in "$CHART"/ci/*-values.yaml; do
+  check "ci/$(basename "$f") renders" "ok" \
+    "$(helm template ci "$CHART" --namespace naira-deps -f "$f" >/dev/null 2>&1 && echo ok || echo "FAILED to render")"
+done
 
 exit $fail

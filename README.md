@@ -16,9 +16,8 @@ defaults expect this chart in namespace `naira-deps`.
 
 | Path | Contents |
 |---|---|
-| `charts/test-dependencies/` | The chart. `values.yaml` holds operator defaults (Secrets supplied externally), `values-dev.yaml` a single-node kind or colima setup, `tests/render-test.sh` the render assertions. |
+| `charts/test-dependencies/` | The chart. `values.yaml` holds operator defaults (Secrets supplied externally), `values-dev.yaml` a single-node kind or colima setup, `ci/` lint and render fixtures, `tests/render-test.sh` the render assertions. |
 | `images/mcp-mock/` | Source of `mcp-mock`, a test double for the catalog's `mcp-servers` plugin. Dev only. |
-| `argocd/environments/poc/` | ArgoCD Applications from the RFC-009 proof of concept. See its README. |
 | `.github/workflows/` | `chart.yml` (lint, render tests, kubeconform, kind install), `chart-publish.yml` (chart to ghcr on tag `v<version>`), `mcp-mock-image.yml` (image to ghcr). |
 
 ## Components
@@ -41,8 +40,8 @@ none of this needs; `values-dev.yaml` adds what a local Naira needs.
 
 ### Local cluster with Naira
 
-Needs `helm` 4, `kubectl`, `yq` v4, and a single-node kind or colima cluster
-with about 4 CPUs and 8 GiB.
+Needs `helm` 4, `kubectl`, and a single-node kind or colima cluster with
+about 4 CPUs and 8 GiB.
 
 1. Fetch the chart's dependencies. Helm 4 does not fetch from unregistered
    HTTP repositories:
@@ -78,14 +77,20 @@ with about 4 CPUs and 8 GiB.
    ```
 
 4. Install the released naira chart into `idp-system`, the only namespace
-   its UI works in for now. The values are the PoC Application's: development
-   Secrets only, everything else is the chart's defaults.
+   its UI works in for now. Its defaults already address this chart in
+   `naira-deps`; only the development Secrets are set. The OpenMetadata plugin
+   is off because `values-dev.yaml` leaves OpenMetadata off.
 
    ```sh
-   yq '.spec.source.helm.valuesObject' argocd/environments/poc/naira.yaml \
-     | helm upgrade --install naira oci://ghcr.io/naira-project/charts/naira \
-         --version "$(yq '.spec.source.targetRevision' argocd/environments/poc/naira.yaml)" \
-         -n idp-system --create-namespace -f - --wait --timeout 10m
+   helm upgrade --install naira oci://ghcr.io/naira-project/charts/naira \
+     --version 0.1.1 -n idp-system --create-namespace \
+     --set catalog.secret.create=true \
+     --set catalog.secret.data.LITELLM_API_KEY=sk-local-litellm \
+     --set catalog.secret.data.OPENMETADATA_ADMIN_PASSWORD=admin \
+     --set catalog.plugins.openmetadata.enabled=false \
+     --set portal.oidc.secret.create=true \
+     --set portal.oidc.secret.value=naira-local-dev-secret \
+     --wait --timeout 10m
    ```
 
 5. Reach it from the browser. The issuer is `http://localhost:8080`, so
@@ -99,8 +104,8 @@ with about 4 CPUs and 8 GiB.
 
    Portal at <http://localhost:3000>, user `testuser`, password `testpass`.
 
-Every credential in `values-dev.yaml`, `files/naira-realm.json` and
-`argocd/environments/poc/` is a local development placeholder.
+Every credential in `values-dev.yaml`, `ci/`, `files/naira-realm.json` and
+the commands above is a local development placeholder.
 
 ### Other clusters
 
