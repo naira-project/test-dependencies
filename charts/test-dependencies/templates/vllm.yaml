@@ -57,6 +57,9 @@ spec:
             - {{ .Values.vllm.servedModelName | quote }}
             - --chat-template
             - /etc/vllm/chat-template.jinja
+            {{- if .Values.vllm.enforceEager }}
+            - --enforce-eager
+            {{- end }}
           env:
             - {name: VLLM_CPU_KVCACHE_SPACE, value: {{ .Values.vllm.kvCacheSpace | quote }}}
           ports:
