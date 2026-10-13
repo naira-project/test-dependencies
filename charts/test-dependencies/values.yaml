@@ -114,6 +114,21 @@ mlflow:
   service: {enabled: true, type: ClusterIP, port: 5000}
   backendStore:
     databaseMigration: false
+    # Upstream's default is ":memory:", which SQLAlchemy opens once per
+    # connection: tables and seeded data on one are missing on the next
+    # ("no such table: runs"). The file lives on the mlflow-data PVC
+    # (templates/mlflow-pvc.yaml, size in mlflowStorage below), so the seed
+    # survives a pod restart.
+    defaultSqlitePath: /mlflow/data/mlflow.db
+  extraVolumes:
+    - {name: data, persistentVolumeClaim: {claimName: mlflow-data}}
+  extraVolumeMounts:
+    - {name: data, mountPath: /mlflow/data}
+  # One SQLite file on a ReadWriteOnce volume: the old pod must stop before
+  # the new one opens it. The subchart's fsGroup 1001 makes the volume
+  # writable for its uid 1001.
+  strategy:
+    type: Recreate
   # MLflow 3.x binds localhost-only and its security middleware rejects
   # requests from anywhere else — including the kubelet's probes, so the
   # container restarts forever. The chart already passes --host 0.0.0.0;
@@ -135,6 +150,10 @@ mlflow:
   resources:
     requests: {cpu: 200m, memory: 512Mi}
     limits: {cpu: 1000m, memory: 2Gi}
+
+# PVC mlflow-data, holding MLflow's SQLite store. A parent key: the mlflow
+# subchart's values schema rejects keys it does not define.
+mlflowStorage: 1Gi
 
 mcpMock:
   # Test double backing the catalog's mcp-servers plugin. Never in a release.

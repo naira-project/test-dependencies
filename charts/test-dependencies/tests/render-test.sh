@@ -116,7 +116,7 @@ check "llamacpp: server exposes metrics" "true" \
 check "llamacpp: fsGroup so the unprivileged downloader can write the PVC" "$(yq '.llamacpp.fsGroup' "$CHART/values.yaml")" \
   "$(render --set tags.llamacpp=true | yq "$LLAMA | .securityContext.fsGroup")"
 check "llamacpp: one shared model cache PVC" "llamacpp-model-cache" \
-  "$(render --set tags.llamacpp=true | yq ea 'select(.kind == "PersistentVolumeClaim") | .metadata.name')"
+  "$(render --set tags.llamacpp=true | yq ea 'select(.kind == "PersistentVolumeClaim" and (.metadata.name | test("^llama"))) | .metadata.name')"
 check "llamacpp: Services are labelled as inference" "llama-dummy-model,llama-qwen25-05b" \
   "$(render --set tags.llamacpp=true | yq ea '[select(.kind == "Service" and .metadata.labels["app.kubernetes.io/component"] == "inference") | .metadata.name] | sort | join(",")')"
 check "llamacpp: models come from values" "llama-only" \
