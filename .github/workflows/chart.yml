@@ -76,6 +76,13 @@ jobs:
     name: Install · test-dependencies on kind
     needs: lint
     runs-on: ubuntu-latest
+    env:
+      CHART_ARGS: >-
+        -n naira-deps
+        -f charts/test-dependencies/values-dev.yaml
+        --set mcpMock.image.registry=
+        --set mcpMock.image.repository=mcp-mock
+        --set mcpMock.image.tag=ci
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -102,14 +109,27 @@ jobs:
         run: |
           # kubectl wait, not --wait: LiteLLM migrates its database on first
           # start, which can outlast a Helm wait.
-          helm install test-dependencies charts/test-dependencies \
-            -n naira-deps --create-namespace \
-            -f charts/test-dependencies/values-dev.yaml \
-            --set mcpMock.image.registry="" \
-            --set mcpMock.image.repository=mcp-mock \
-            --set mcpMock.image.tag=ci
+          # shellcheck disable=SC2086
+          helm install test-dependencies charts/test-dependencies --create-namespace ${CHART_ARGS}
           kubectl -n naira-deps wait --for=condition=Available deployment --all --timeout=12m
           kubectl -n naira-deps wait --for=jsonpath='{.status.readyReplicas}'=1 statefulset --all --timeout=12m
+          kubectl -n naira-deps wait --for=condition=complete job --all --timeout=10m
+      - name: Upgrade
+        # Seed Jobs are named by a hash of their spec: an unchanged upgrade
+        # must leave them alone, a changed spec must replace them, and
+        # everything must come back healthy either way.
+        run: |
+          uids() { kubectl -n naira-deps get jobs -o jsonpath='{range .items[*]}{.metadata.uid}{"\n"}{end}' | sort; }
+          before=$(uids)
+          # shellcheck disable=SC2086
+          helm upgrade test-dependencies charts/test-dependencies ${CHART_ARGS}
+          [ "$(uids)" = "$before" ] || { echo "::error::an unchanged upgrade replaced a Job"; exit 1; }
+          # shellcheck disable=SC2086
+          helm upgrade test-dependencies charts/test-dependencies ${CHART_ARGS} --set seed.backoffLimit=11
+          [ "$(uids)" != "$before" ] || { echo "::error::a changed seed spec kept the old Job"; exit 1; }
+          kubectl -n naira-deps wait --for=condition=Available deployment --all --timeout=12m
+          kubectl -n naira-deps wait --for=jsonpath='{.status.readyReplicas}'=1 statefulset --all --timeout=12m
+          kubectl -n naira-deps wait --for=condition=complete job --all --timeout=10m
       - name: Show state
         if: always()
         run: kubectl -n naira-deps get pods,jobs -o wide
