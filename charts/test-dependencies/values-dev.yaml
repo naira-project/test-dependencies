@@ -84,7 +84,6 @@ litellm:
           model: openai/qwen2.5-0.5b-instruct
           api_base: http://llama-qwen25-05b:8080/v1
     litellm_settings:
-      callbacks: [prometheus]
       prometheus_initialize_budget_metrics: true
     mcp_servers:
       mock_kb:

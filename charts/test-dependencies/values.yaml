@@ -79,6 +79,8 @@ litellm:
           model: mistral/mistral-small-latest
           api_key: os.environ/MISTRAL_API_KEY
           api_base: https://api.mistral.ai/v1
+    litellm_settings:
+      callbacks: [prometheus]   # serves /metrics (404 without)
   resources:
     requests: {cpu: 200m, memory: 512Mi}
     limits: {memory: 2Gi}   # 1Gi OOMKills on startup

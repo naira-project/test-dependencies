@@ -31,6 +31,8 @@ check "no generated masterkey Secret by default" "" \
   "$(render | yq 'select(.kind == "Secret" and .metadata.name == "litellm-masterkey") | .metadata.name')"
 check "litellm reads masterkey from litellm-masterkey" "litellm-masterkey" \
   "$(render | yq "$LITELLM | .env[] | select(.name == \"PROXY_MASTER_KEY\") | .valueFrom.secretKeyRef.name")"
+check "litellm serves /metrics by default" "prometheus" \
+  "$(render | yq 'select(.kind == "ConfigMap" and .metadata.name == "litellm-config") | .data["config.yaml"]' | yq '.litellm_settings.callbacks[0]')"
 check "litellm loads provider keys" "litellm-provider-keys" \
   "$(render | yq "$LITELLM | .envFrom[].secretRef.name")"
 check "masterkey Secret when create=true" "sk-test" \
