@@ -198,16 +198,23 @@ check "dev: every provider key the model list reads is in the Secret" "" \
 # sample data Jobs
 check "seed: no Jobs by default" "" \
   "$(render | yq ea 'select(.kind == "Job" and (.metadata.name | test("^seed-"))) | .metadata.name')"
-check "dev: mlflow seed Job, named per revision" "seed-mlflow-1" \
-  "$(render "${DEV[@]}" | yq ea 'select(.kind == "Job" and (.metadata.name | test("^seed-"))) | .metadata.name')"
+# Named by a hash of spec and script, never .Release.Revision (always 1 under
+# Argo CD's `helm template`, so a changed spec failed the sync).
+SEEDS='[select(.kind == "Job" and (.metadata.name | test("^seed-"))) | .metadata.name] | sort | join(",")'
+seeds() { render "$@" | yq ea "$SEEDS"; }
+check "dev: mlflow seed Job, named by hash" "yes" \
+  "$(seeds "${DEV[@]}" | grep -qE '^seed-mlflow-[0-9a-f]{8}$' && echo yes || echo no)"
+check "seed: name is stable across renders" "$(seeds "${DEV[@]}")" "$(seeds "${DEV[@]}")"
+check "seed: new name when the spec changes" "no" \
+  "$([ "$(seeds "${DEV[@]}")" = "$(seeds "${DEV[@]}" --set seed.mlflow.image=x)" ] && echo yes || echo no)"
 check "dev: mlflow seed reaches the mlflow Service" "http://mlflow:5000" \
-  "$(render "${DEV[@]}" | yq 'select(.kind == "Job" and .metadata.name == "seed-mlflow-1") | .spec.template.spec.containers[0].env[] | select(.name == "MLFLOW_TRACKING_URI") | .value')"
+  "$(render "${DEV[@]}" | yq 'select(.kind == "Job" and (.metadata.name | test("^seed-mlflow-"))) | .spec.template.spec.containers[0].env[] | select(.name == "MLFLOW_TRACKING_URI") | .value')"
 check "seed: mlflow image is the subchart's" "$(render | yq 'select(.kind == "Deployment" and .metadata.name == "mlflow") | .spec.template.spec.containers[0].image')" \
   "$(yq '.seed.mlflow.image' "$CHART/values.yaml")"
 check "seed: mlflow script is mounted" "yes" \
   "$(render "${DEV[@]}" | yq 'select(.kind == "ConfigMap" and .metadata.name == "seed-mlflow") | .data["seed.py"]' | grep -q 'registered_model_name' && echo yes || echo no)"
-check "dev+openmetadata: openmetadata seed Job" "seed-mlflow-1,seed-openmetadata-1" \
-  "$(render "${DEV[@]}" "${OM[@]}" | yq ea '[select(.kind == "Job" and (.metadata.name | test("^seed-"))) | .metadata.name] | sort | join(",")')"
+check "dev+openmetadata: openmetadata seed Job" "yes" \
+  "$(seeds "${DEV[@]}" "${OM[@]}" | grep -qE '^seed-mlflow-[0-9a-f]{8},seed-openmetadata-[0-9a-f]{8}$' && echo yes || echo no)"
 check "seed: none for a component that is off" "" \
   "$(render "${DEV[@]}" --set tags.mlflow=false | yq ea 'select(.kind == "Job" and (.metadata.name | test("^seed-"))) | .metadata.name')"
 

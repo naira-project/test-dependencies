@@ -3,12 +3,66 @@ Sample data for the components Naira catalogs: a registered model in MLflow
 and a database service with tables and lineage in OpenMetadata. Scripts live
 in files/seed/.
 
-Jobs are immutable, so the name carries the release revision: every
-`helm upgrade` replaces the Job instead of failing to patch it, and re-runs the
-seed. Both scripts are safe to re-run (MLflow adds a model version,
+A Job's pod template is immutable, so the name carries a hash of the rendered
+spec and the script: any change to either is a new Job, and an unchanged one
+is left alone. Not .Release.Revision: Argo CD renders with `helm template`,
+where it is always 1, so the name never changed and a changed spec failed the
+sync. To re-seed without a change, delete the Job; Helm and Argo CD both
+re-create it. Both scripts are safe to re-run (MLflow adds a model version,
 OpenMetadata PUTs). backoffLimit covers the server still starting.
 */}}
+{{- define "deps.seed.mlflow.spec" -}}
+backoffLimit: {{ .Values.seed.backoffLimit }}
+template:
+  metadata:
+    labels: {{- include "deps.labels" . | nindent 6 }}
+  spec:
+    restartPolicy: Never
+    containers:
+      - name: seed
+        image: {{ .Values.seed.mlflow.image | quote }}
+        command: [python, /seed/seed.py]
+        # The server resolves its relative --default-artifact-root to
+        # /mlflow/mlruns and the client writes the artifacts there, in this
+        # container (same image, so /mlflow is writable). Only the registry
+        # entry reaches the server, which is what the catalog reads.
+        workingDir: /tmp
+        env:
+          - {name: MLFLOW_TRACKING_URI, value: "http://mlflow:{{ .Values.mlflow.service.port }}"}
+          - {name: HOME, value: /tmp}
+        resources: {{- toYaml .Values.seed.resources | nindent 10 }}
+        volumeMounts:
+          - {name: seed, mountPath: /seed}
+          - {name: tmp, mountPath: /tmp}
+    volumes:
+      - {name: seed, configMap: {name: seed-mlflow}}
+      - {name: tmp, emptyDir: {}}
+{{- end }}
+{{- define "deps.seed.openmetadata.spec" -}}
+backoffLimit: {{ .Values.seed.backoffLimit }}
+template:
+  metadata:
+    labels: {{- include "deps.labels" . | nindent 6 }}
+  spec:
+    restartPolicy: Never
+    containers:
+      - name: seed
+        image: {{ .Values.seed.openmetadata.image | quote }}
+        command:
+          - sh
+          - -c
+          - pip install --no-cache-dir --quiet {{ .Values.seed.openmetadata.requests | quote }} && python /seed/seed.py
+        env:
+          - {name: OPENMETADATA_HOST_PORT, value: "http://openmetadata:8585"}
+        resources: {{- toYaml .Values.seed.resources | nindent 10 }}
+        volumeMounts:
+          - {name: seed, mountPath: /seed}
+    volumes:
+      - {name: seed, configMap: {name: seed-openmetadata}}
+{{- end }}
 {{- if and .Values.tags.mlflow .Values.seed.mlflow.enabled }}
+{{- $script := .Files.Get "files/seed/register_dummy_model.py" }}
+{{- $spec := include "deps.seed.mlflow.spec" . }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -17,42 +71,20 @@ metadata:
   labels: {{- include "deps.labels" . | nindent 4 }}
 data:
   seed.py: |
-    {{- .Files.Get "files/seed/register_dummy_model.py" | nindent 4 }}
+    {{- $script | nindent 4 }}
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: seed-mlflow-{{ .Release.Revision }}
+  name: seed-mlflow-{{ print $spec $script | sha256sum | trunc 8 }}
   namespace: {{ .Release.Namespace }}
   labels: {{- include "deps.labels" . | nindent 4 }}
 spec:
-  backoffLimit: {{ .Values.seed.backoffLimit }}
-  template:
-    metadata:
-      labels: {{- include "deps.labels" . | nindent 8 }}
-    spec:
-      restartPolicy: Never
-      containers:
-        - name: seed
-          image: {{ .Values.seed.mlflow.image | quote }}
-          command: [python, /seed/seed.py]
-          # The server resolves its relative --default-artifact-root to
-          # /mlflow/mlruns and the client writes the artifacts there, in this
-          # container (same image, so /mlflow is writable). Only the registry
-          # entry reaches the server, which is what the catalog reads.
-          workingDir: /tmp
-          env:
-            - {name: MLFLOW_TRACKING_URI, value: "http://mlflow:{{ .Values.mlflow.service.port }}"}
-            - {name: HOME, value: /tmp}
-          resources: {{- toYaml .Values.seed.resources | nindent 12 }}
-          volumeMounts:
-            - {name: seed, mountPath: /seed}
-            - {name: tmp, mountPath: /tmp}
-      volumes:
-        - {name: seed, configMap: {name: seed-mlflow}}
-        - {name: tmp, emptyDir: {}}
+  {{- $spec | nindent 2 }}
 {{- end }}
 {{- if and .Values.tags.openmetadata .Values.seed.openmetadata.enabled }}
+{{- $script := .Files.Get "files/seed/seed_sample_tables.py" }}
+{{- $spec := include "deps.seed.openmetadata.spec" . }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -62,33 +94,14 @@ metadata:
   labels: {{- include "deps.labels" . | nindent 4 }}
 data:
   seed.py: |
-    {{- .Files.Get "files/seed/seed_sample_tables.py" | nindent 4 }}
+    {{- $script | nindent 4 }}
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: seed-openmetadata-{{ .Release.Revision }}
+  name: seed-openmetadata-{{ print $spec $script | sha256sum | trunc 8 }}
   namespace: {{ .Release.Namespace }}
   labels: {{- include "deps.labels" . | nindent 4 }}
 spec:
-  backoffLimit: {{ .Values.seed.backoffLimit }}
-  template:
-    metadata:
-      labels: {{- include "deps.labels" . | nindent 8 }}
-    spec:
-      restartPolicy: Never
-      containers:
-        - name: seed
-          image: {{ .Values.seed.openmetadata.image | quote }}
-          command:
-            - sh
-            - -c
-            - pip install --no-cache-dir --quiet {{ .Values.seed.openmetadata.requests | quote }} && python /seed/seed.py
-          env:
-            - {name: OPENMETADATA_HOST_PORT, value: "http://openmetadata:8585"}
-          resources: {{- toYaml .Values.seed.resources | nindent 12 }}
-          volumeMounts:
-            - {name: seed, mountPath: /seed}
-      volumes:
-        - {name: seed, configMap: {name: seed-openmetadata}}
+  {{- $spec | nindent 2 }}
 {{- end }}
