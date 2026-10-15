@@ -249,11 +249,6 @@ kube-prometheus-stack:
   grafana:
     adminPassword: grafana-local-admin
 
-servicemonitors:
-  # Gated by tags.monitoring together with kube-prometheus-stack, so the CRs
-  # can never be applied before the operator that defines them.
-  catalogPort: 8090
-
 llamacpp:
   # Pinned by digest: `server` is a moving tag, and one cluster ran two
   # different builds under it (2026-10-13). This digest (multi-arch index) is
