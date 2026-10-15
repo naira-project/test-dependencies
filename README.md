@@ -111,7 +111,8 @@ the commands above is a local development placeholder.
 
 Keep `values.yaml`'s default of operator-supplied Secrets (the
 `secrets.*.create: false` keys document each name and key) and set
-`keycloak.hostname` to the address browsers use. Released charts:
+`keycloak.hostname` to the address browsers use. Replace the development
+realm with `keycloak.realmImport.existingConfigMap`. Released charts:
 
 ```sh
 helm install test-dependencies oci://ghcr.io/naira-project/charts/test-dependencies \

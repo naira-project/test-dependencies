@@ -102,6 +102,16 @@ must_fail "keycloak admin create needs a password" "keycloak.admin.password is r
   --set keycloak.admin.create=true --set keycloak.admin.username=x
 must_fail "keycloak admin: existing and create" "keycloak.admin: set existingSecret or create, not both" \
   --set keycloak.admin.create=true --set keycloak.admin.existingSecret=x --set keycloak.admin.username=x --set keycloak.admin.password=x
+
+# keycloak realm import: bundled by default, replaceable per environment
+KCVOL='select(.kind == "Deployment" and .metadata.name == "keycloak") | .spec.template.spec.volumes[] | select(.name == "realm-import") | .configMap.name'
+check "keycloak imports the bundled realm by default" "keycloak-realm-import" "$(render | yq "$KCVOL")"
+check "keycloak imports an existing realm ConfigMap" "my-realm" \
+  "$(render --set keycloak.realmImport.existingConfigMap=my-realm | yq "$KCVOL")"
+check "no bundled realm ConfigMap with existingConfigMap" "" \
+  "$(render --set keycloak.realmImport.existingConfigMap=my-realm \
+     | yq 'select(.kind == "ConfigMap" and .metadata.name == "keycloak-realm-import") | .metadata.name')"
+
 check "mcp-mock off by default" "" \
   "$(render | yq 'select(.kind == "Deployment" and .metadata.name == "mcp-mock") | .metadata.name')"
 check "ServiceMonitor carries the release label" "t" \

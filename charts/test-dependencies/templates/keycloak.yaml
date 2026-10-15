@@ -1,5 +1,6 @@
 {{- if .Values.tags.keycloak }}
 {{- $secret := .Values.keycloak.admin.existingSecret | default (printf "%s-keycloak-admin" .Release.Name) }}
+{{- $realm := .Values.keycloak.realmImport.existingConfigMap }}
 {{- if .Values.keycloak.admin.create }}
 apiVersion: v1
 kind: Secret
@@ -15,6 +16,7 @@ stringData:
   password: {{ required "keycloak.admin.password is required when create=true" .Values.keycloak.admin.password | quote }}
 ---
 {{- end }}
+{{- if not $realm }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -25,6 +27,7 @@ data:
   naira-realm.json: |
 {{ .Files.Get "files/naira-realm.json" | indent 4 }}
 ---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -40,8 +43,10 @@ spec:
       labels:
         app: keycloak
         {{- include "deps.labels" . | nindent 8 }}
+      {{- if not $realm }}
       annotations:
         checksum/realm: {{ .Files.Get "files/naira-realm.json" | sha256sum }}
+      {{- end }}
     spec:
       containers:
         - name: keycloak
@@ -76,7 +81,7 @@ spec:
           resources: {{- toYaml .Values.keycloak.resources | nindent 12 }}
       volumes:
         - name: realm-import
-          configMap: {name: keycloak-realm-import}
+          configMap: {name: {{ $realm | default "keycloak-realm-import" }}}
 ---
 apiVersion: v1
 kind: Service

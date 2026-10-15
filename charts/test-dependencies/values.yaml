@@ -42,11 +42,14 @@ secrets:
 # ── on by default ─────────────────────────────────────────────────────────────
 
 keycloak:
-  # files/naira-realm.json carries development-only credentials: client secret
-  # naira-local-dev-secret, user testuser/testpass, registration open, SSL not
-  # required. Replace it for any shared environment.
   image: quay.io/keycloak/keycloak:26.6.4
-  realm: naira
+  realmImport:
+    # Empty: import the bundled files/naira-realm.json, which carries
+    # development-only credentials (client secret naira-local-dev-secret, user
+    # testuser/testpass, registration open, SSL not required). For any shared
+    # environment, name a ConfigMap in the release namespace instead; every
+    # *.json key in it is imported as a realm.
+    existingConfigMap: ""
   # Browser-facing hostname. Port-forwarded in every environment reached from
   # a laptop, which is why it is localhost and not a cluster DNS name.
   hostname: http://localhost:8080
