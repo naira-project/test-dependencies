@@ -220,6 +220,10 @@ check "dev+openmetadata: openmetadata seed Job" "yes" \
 check "seed: none for a component that is off" "" \
   "$(render "${DEV[@]}" --set tags.mlflow=false | yq ea 'select(.kind == "Job" and (.metadata.name | test("^seed-"))) | .metadata.name')"
 
+# securityContext on the pods this chart defines (llama.cpp and vLLM excepted)
+check "own pods run as non-root" "keycloak:true,mcp-mock:true,seed:true,seed:true" \
+  "$(render "${DEV[@]}" "${OM[@]}" | yq ea '[select((.kind == "Deployment" or .kind == "Job") and (.metadata.name | test("^(keycloak|mcp-mock|seed-)"))) | .spec.template.spec.containers[] | .name + ":" + (.securityContext.runAsNonRoot | tostring)] | sort | join(",")')"
+
 # Every ci/ fixture must keep rendering against this chart's guards (the PoC
 # values drifted from the chart once already).
 for f in "$CHART"/ci/*-values.yaml; do

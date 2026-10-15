@@ -31,6 +31,12 @@ template:
           - {name: MLFLOW_TRACKING_URI, value: "http://mlflow:{{ .Values.mlflow.service.port }}"}
           - {name: HOME, value: /tmp}
         resources: {{- toYaml .Values.seed.resources | nindent 10 }}
+        securityContext:
+          {{- include "deps.securityContext" . | nindent 10 }}
+          # The image names its user (mlflow); 1001 is its uid, as the mlflow
+          # subchart runs it. Root filesystem stays writable for /mlflow/mlruns.
+          runAsUser: 1001
+          runAsGroup: 1001
         volumeMounts:
           - {name: seed, mountPath: /seed}
           - {name: tmp, mountPath: /tmp}
@@ -51,14 +57,25 @@ template:
         command:
           - sh
           - -c
-          - pip install --no-cache-dir --quiet {{ .Values.seed.openmetadata.requests | quote }} && python /seed/seed.py
+          - pip install --no-cache-dir --quiet --target /tmp/deps {{ .Values.seed.openmetadata.requests | quote }} && python /seed/seed.py
         env:
           - {name: OPENMETADATA_HOST_PORT, value: "http://openmetadata:8585"}
+          # python:slim runs as root and pip would write to the system
+          # site-packages; as nobody it installs into /tmp instead.
+          - {name: PYTHONPATH, value: /tmp/deps}
+          - {name: HOME, value: /tmp}
         resources: {{- toYaml .Values.seed.resources | nindent 10 }}
+        securityContext:
+          {{- include "deps.securityContext" . | nindent 10 }}
+          runAsUser: 65534
+          runAsGroup: 65534
+          readOnlyRootFilesystem: true
         volumeMounts:
           - {name: seed, mountPath: /seed}
+          - {name: tmp, mountPath: /tmp}
     volumes:
       - {name: seed, configMap: {name: seed-openmetadata}}
+      - {name: tmp, emptyDir: {}}
 {{- end }}
 {{- if and .Values.tags.mlflow .Values.seed.mlflow.enabled }}
 {{- $script := .Files.Get "files/seed/register_dummy_model.py" }}
