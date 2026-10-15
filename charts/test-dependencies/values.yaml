@@ -135,6 +135,31 @@ mlflow:
     - {name: data, persistentVolumeClaim: {claimName: mlflow-data}}
   extraVolumeMounts:
     - {name: data, mountPath: /mlflow/data}
+  # The server migrates an older database itself only when a table is missing;
+  # otherwise it refuses to start ("Detected out-of-date database schema",
+  # mlflow/store/tracking/sqlalchemy_store.py in 3.16.0), so a release that
+  # only alters existing tables crash-loops on the existing PVC.
+  # backendStore.databaseMigration does not help: the subchart migrates only
+  # PostgreSQL, MySQL and MSSQL. This runs `mlflow db upgrade` on the SQLite
+  # file before the server starts (a no-op when current); on a first start
+  # there is no file and the server creates it. The subchart copies initContainers
+  # verbatim, so the image is a literal: keep it equal to the server's
+  # (tests/render-test.sh checks). uid 1001 like the server, so SQLite never
+  # leaves a file the server cannot write.
+  initContainers:
+    - name: db-upgrade
+      image: burakince/mlflow:3.16.0
+      command: [sh, -c, 'if [ -f /mlflow/data/mlflow.db ]; then mlflow db upgrade sqlite:////mlflow/data/mlflow.db; fi']
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities: {drop: [ALL]}
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+      volumeMounts:
+        - {name: data, mountPath: /mlflow/data}
+        - {name: tmp, mountPath: /tmp}
   # One SQLite file on a ReadWriteOnce volume: the old pod must stop before
   # the new one opens it. The subchart's fsGroup 1001 makes the volume
   # writable for its uid 1001.

@@ -209,6 +209,8 @@ check "seed: new name when the spec changes" "no" \
   "$([ "$(seeds "${DEV[@]}")" = "$(seeds "${DEV[@]}" --set seed.mlflow.image=x)" ] && echo yes || echo no)"
 check "dev: mlflow seed reaches the mlflow Service" "http://mlflow:5000" \
   "$(render "${DEV[@]}" | yq 'select(.kind == "Job" and (.metadata.name | test("^seed-mlflow-"))) | .spec.template.spec.containers[0].env[] | select(.name == "MLFLOW_TRACKING_URI") | .value')"
+check "mlflow: db-upgrade image is the server's" "$(render | yq 'select(.kind == "Deployment" and .metadata.name == "mlflow") | .spec.template.spec.containers[0].image')" \
+  "$(render | yq 'select(.kind == "Deployment" and .metadata.name == "mlflow") | .spec.template.spec.initContainers[] | select(.name == "db-upgrade") | .image')"
 check "seed: mlflow image is the subchart's" "$(render | yq 'select(.kind == "Deployment" and .metadata.name == "mlflow") | .spec.template.spec.containers[0].image')" \
   "$(yq '.seed.mlflow.image' "$CHART/values.yaml")"
 check "seed: mlflow script is mounted" "yes" \
