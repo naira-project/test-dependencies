@@ -1,9 +1,4 @@
-# Local kind. Tilt installs this chart with this file.
-#
-# On here is what fits on one kind node alongside the Naira chart: Keycloak,
-# LiteLLM + its PostgreSQL, MLflow, llama.cpp (two small models, downloaded on
-# first start) and mcp-mock, plus sample data in MLflow (and in OpenMetadata
-# when its tag is on).
+# Single-node kind/colima, alongside the Naira chart. All credentials are placeholders.
 
 tags:
   keycloak: true
@@ -28,25 +23,22 @@ secrets:
   litellmProviderKeys:
     create: true
     data:
-      # Fake is fine: LiteLLM lists models without calling the provider.
+      # Fake: listing models never calls the provider.
       MISTRAL_API_KEY: change-me
       OPENAI_API_KEY: change-me
       ANTHROPIC_API_KEY: change-me
       GEMINI_API_KEY: change-me
       OPENROUTER_API_KEY: change-me
-  # tags.openmetadata stays off (heavy); this and the block below are wired so
-  # `--set tags.openmetadata=true` brings it up without further values.
+  # Ready for `--set tags.openmetadata=true`.
   openmetadataMysql:
-    create: true   # password: chart default, equals the init script's literal
+    create: true
 
 litellm:
   postgresql:
     auth:
       password: litellm-local-postgres
       postgres-password: litellm-local-postgres
-  # Sample catalog content for the Naira litellm plugins: several providers,
-  # one model name with two deployments (regions), an embedding model and a
-  # route to the local llama.cpp. Replaces values.yaml's list.
+  # Sample catalog content for the litellm plugins. Replaces values.yaml's list.
   proxy_config:
     model_list:
       - model_name: chat-small
@@ -88,7 +80,7 @@ litellm:
           api_base: https://openrouter.ai/api/v1
       - model_name: idp-llama-qwen25-05b
         litellm_params:
-          # llama.cpp from tags.llamacpp, same namespace; OpenAI-compatible.
+          # local llama.cpp (tags.llamacpp)
           model: openai/qwen2.5-0.5b-instruct
           api_base: http://llama-qwen25-05b:8080/v1
     litellm_settings:
@@ -101,9 +93,7 @@ litellm:
         description: Mock MCP server for local development
 
 mlflow:
-  # Pinned so renders are deterministic; upstream otherwise generates a new
-  # key on every render.
-  flaskServerSecretKey: local-dev-flask-key
+  flaskServerSecretKey: local-dev-flask-key   # fixed: generated otherwise on every render
 
 seed:
   mlflow:

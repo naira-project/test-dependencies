@@ -6,11 +6,7 @@ app.kubernetes.io/part-of: naira
 naira.io/tier: dependencies
 {{- end -}}
 
-{{- /*
-Container securityContext for the pods this chart defines itself: Pod
-Security "restricted" minus runAsUser and readOnlyRootFilesystem, which
-depend on the image and are set per container.
-*/}}
+{{- /* PSS restricted, minus runAsUser and readOnlyRootFilesystem (per image). */}}
 {{- define "deps.securityContext" -}}
 allowPrivilegeEscalation: false
 capabilities: {drop: [ALL]}

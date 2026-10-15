@@ -1,9 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Naira Project Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-# Publishes the chart as an OCI artifact:
-#   oci://ghcr.io/naira-project/charts/test-dependencies:<version>
-# Trigger: push a tag v<version>, where <version> is charts/test-dependencies/Chart.yaml's `version`.
+# Pushes oci://ghcr.io/naira-project/charts/test-dependencies:<version> on tag v<version>.
 name: Chart publish
 
 on:

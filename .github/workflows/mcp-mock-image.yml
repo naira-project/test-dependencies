@@ -1,15 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Naira Project Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-# mcp-mock is a test double for the catalog's mcp-servers plugin. Dev only,
-# never part of a Naira release. Built for linux/amd64 and linux/arm64 by the
-# shared workflows, published on main as <chart appVersion>, sha-<commit>,
-# main and latest; the chart's default tag is the appVersion.
-#
-# A published appVersion tag is never overwritten: changing images/mcp-mock
-# requires bumping `appVersion` in charts/test-dependencies/Chart.yaml. A new
-# appVersion with no image change publishes the current source under it, so
-# the chart never points at a tag that was not built.
+# mcp-mock (dev only), amd64+arm64, published on main as the chart's appVersion.
+# A published appVersion is never overwritten: image changes need an appVersion bump.
 name: mcp-mock image
 
 on:

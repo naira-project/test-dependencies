@@ -1,7 +1,4 @@
-{{/*
-MLflow's SQLite store (mlflow.backendStore.defaultSqlitePath). Mounted by the
-subchart through mlflow.extraVolumes; the claim name is fixed there.
-*/}}
+{{/* MLflow's SQLite store, mounted via mlflow.extraVolumes. */}}
 {{- if .Values.tags.mlflow }}
 apiVersion: v1
 kind: PersistentVolumeClaim

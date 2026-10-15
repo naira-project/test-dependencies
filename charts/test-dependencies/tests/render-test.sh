@@ -5,7 +5,7 @@ set -euo pipefail
 CHART="$(cd "$(dirname "$0")/.." && pwd)"
 fail=0
 
-# Bare defaults do not render: secrets.litellmPostgres.password is required.
+# Defaults need the LiteLLM PostgreSQL passwords to render.
 render() { helm template t "$CHART" --namespace deps --set litellm.postgresql.auth.password=test-pg --set litellm.postgresql.auth.postgres-password=test-pg "$@"; }
 
 check() {
@@ -45,7 +45,7 @@ must_fail "masterkey create needs a value" "secrets.litellmMasterkey.value is re
 # bitnami PostgreSQL must not render its own (random) Secret
 check "postgres reuses litellm-dbcredentials" "" \
   "$(render | yq 'select(.kind == "Secret" and (.metadata.name | test("postgresql"))) | .metadata.name')"
-# Only mlflow's flask key may differ between two default renders (see Global Constraints)
+# Only mlflow's flask key may differ between two default renders
 a=$(mktemp); b=$(mktemp); render > "$a"; render > "$b"
 changed=""
 for n in $(yq ea '[select(.kind == "Secret") | .metadata.name] | .[]' "$a"); do
@@ -165,7 +165,7 @@ check "no inference ServiceMonitor without a backend" "" \
 check "no inference ServiceMonitor without monitoring" "" \
   "$(render --set tags.llamacpp=true | yq ea 'select(.kind == "ServiceMonitor") | .metadata.name')"
 
-# openmetadata: server + its dependencies (MySQL, OpenSearch) ride one tag; Airflow stays off
+# openmetadata: server and dependencies on one tag, no Airflow
 OM=(--set tags.openmetadata=true)
 check "openmetadata off by default" "" \
   "$(render | yq 'select(.kind == "Deployment" and .metadata.name == "openmetadata") | .metadata.name')"
@@ -198,8 +198,7 @@ check "dev: every provider key the model list reads is in the Secret" "" \
 # sample data Jobs
 check "seed: no Jobs by default" "" \
   "$(render | yq ea 'select(.kind == "Job" and (.metadata.name | test("^seed-"))) | .metadata.name')"
-# Named by a hash of spec and script, never .Release.Revision (always 1 under
-# Argo CD's `helm template`, so a changed spec failed the sync).
+# Named by a hash of spec and script, not .Release.Revision (always 1 under Argo)
 SEEDS='[select(.kind == "Job" and (.metadata.name | test("^seed-"))) | .metadata.name] | sort | join(",")'
 seeds() { render "$@" | yq ea "$SEEDS"; }
 check "dev: mlflow seed Job, named by hash" "yes" \
@@ -224,8 +223,7 @@ check "seed: none for a component that is off" "" \
 check "own pods run as non-root" "keycloak:true,mcp-mock:true,seed:true,seed:true" \
   "$(render "${DEV[@]}" "${OM[@]}" | yq ea '[select((.kind == "Deployment" or .kind == "Job") and (.metadata.name | test("^(keycloak|mcp-mock|seed-)"))) | .spec.template.spec.containers[] | .name + ":" + (.securityContext.runAsNonRoot | tostring)] | sort | join(",")')"
 
-# Every ci/ fixture must keep rendering against this chart's guards (the PoC
-# values drifted from the chart once already).
+# Every ci/ fixture must still render
 for f in "$CHART"/ci/*-values.yaml; do
   check "ci/$(basename "$f") renders" "ok" \
     "$(helm template ci "$CHART" --namespace naira-deps -f "$f" >/dev/null 2>&1 && echo ok || echo "FAILED to render")"

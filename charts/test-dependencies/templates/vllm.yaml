@@ -1,13 +1,6 @@
 {{/*
-vLLM (CPU). One model, served over the OpenAI-compatible API on 8000. The chat
-template is mounted because small base models ship without one. Mutually
-exclusive with llama.cpp (validate.yaml).
-
-Startup (importing torch, downloading the model, initializing the engine) took
-about four minutes on a sandbox node, so a startup probe gates the others. The
-Hugging Face cache is an emptyDir: a container restart reuses the download.
-maxSurge 0: during a rollout the default strategy ran the old and the new pod
-side by side, and on a 2-vCPU node neither started within the probe window.
+vLLM on CPU. Chat template mounted: small base models ship without one.
+maxSurge 0: two pods side by side never start on a 2-vCPU node.
 */}}
 {{- if .Values.tags.vllm }}
 apiVersion: v1
@@ -72,7 +65,7 @@ spec:
           volumeMounts:
             - {name: chat-template, mountPath: /etc/vllm/chat-template.jinja, subPath: chat-template.jinja, readOnly: true}
             - {name: dshm, mountPath: /dev/shm}
-            # The image runs as root; vLLM caches models under $HOME.
+            # runs as root; survives container restarts
             - {name: hf-cache, mountPath: /root/.cache/huggingface}
           startupProbe:
             httpGet: {path: /health, port: http}

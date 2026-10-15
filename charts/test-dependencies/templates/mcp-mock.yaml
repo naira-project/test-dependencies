@@ -29,8 +29,7 @@ spec:
           resources: {{- toYaml .Values.mcpMock.resources | nindent 12 }}
           securityContext:
             {{- include "deps.securityContext" . | nindent 12 }}
-            # distroless `nonroot`; the image names its user, which
-            # runAsNonRoot cannot verify without the uid.
+            # distroless nonroot; the image names its user, so give the uid
             runAsUser: 65532
             readOnlyRootFilesystem: true
 ---

@@ -1,28 +1,18 @@
-# test-dependencies — the tier Naira talks to but does not ship (RFC-009 §1).
-#
-# NOTE: deliberately no `global.imageRegistry`. Helm globals propagate into
-# every subchart, and litellm's bundled bitnami PostgreSQL honours that key —
-# setting it rewrites bitnami's own images and trips their image-verification
-# guard. First-party registries stay local to the component that needs one.
+# test-dependencies: the third-party tier Naira talks to (RFC-009 §1).
+# No global.imageRegistry: it would also rewrite bitnami PostgreSQL's images.
 
-# ── what is installed ─────────────────────────────────────────────────────────
-# One switch per component. Three are on: an operator who runs none of this
-# gets a working environment. An adopter turns off what they already have.
-#
-# Tags, not `condition: <name>.enabled` — see the note in Chart.yaml.
+# One tag per component (tags, not conditions: see Chart.yaml).
 tags:
   keycloak: true
   litellm: true          # includes its own PostgreSQL
   mlflow: true
   mcpMock: false          # test double; on in values-dev.yaml
   openmetadata: false
-  monitoring: false      # kube-prometheus-stack AND the ServiceMonitors
+  monitoring: false      # kube-prometheus-stack and the ServiceMonitors
   llamacpp: false
   vllm: false
 
-# ── Secrets this chart can create ─────────────────────────────────────────────
-# Fixed names; the litellm subchart below is pointed at them. Default: the
-# operator supplies them (ExternalSecret). create: true is for kind and e2e.
+# Secrets with fixed names. create: false means the operator supplies them.
 secrets:
   litellmMasterkey:
     create: false
@@ -30,11 +20,7 @@ secrets:
   litellmProviderKeys:
     create: false
     data: {}
-  # Secret `mysql-secrets` (key openmetadata-mysql-password): the password of
-  # MySQL user openmetadata_user, which upstream's init script creates with the
-  # literal `openmetadata_password` (openmetadata-dependencies.mysql.initdbScripts).
-  # Helm cannot template subchart values, so the two are kept equal by hand and
-  # checked by tests/render-test.sh. Change both or neither.
+  # Must equal the literal in openmetadata-dependencies.mysql.initdbScripts (validate.yaml checks).
   openmetadataMysql:
     create: false
     password: openmetadata_password
@@ -44,20 +30,11 @@ secrets:
 keycloak:
   image: quay.io/keycloak/keycloak:26.6.4
   realmImport:
-    # Empty: import the bundled files/naira-realm.json, which carries
-    # development-only credentials (client secret naira-local-dev-secret, user
-    # testuser/testpass, registration open, SSL not required). For any shared
-    # environment, name a ConfigMap in the release namespace instead; every
-    # *.json key in it is imported as a realm.
+    # Empty: bundled files/naira-realm.json (dev credentials). Otherwise a ConfigMap of *.json realms.
     existingConfigMap: ""
-  # Browser-facing hostname. Port-forwarded in every environment reached from
-  # a laptop, which is why it is localhost and not a cluster DNS name.
-  hostname: http://localhost:8080
+  hostname: http://localhost:8080   # browser-facing; reached via port-forward
   admin:
-    # Same rule as everywhere else: supply the Secret, do not commit it.
-    # Default path (create: false, existingSecret: ""): the Deployment reads
-    # a Secret named <release name>-keycloak-admin with keys username and
-    # password, which the operator must supply (for example an ExternalSecret).
+    # Default: operator supplies Secret <release>-keycloak-admin (keys username, password).
     existingSecret: ""
     create: false
     username: ""
@@ -68,27 +45,22 @@ keycloak:
 
 litellm:
   fullnameOverride: litellm
-  # Never let the subchart generate a key: it re-randomises on every render.
+  # Fixed Secret: the subchart would otherwise generate a new key on every render.
   masterkeySecretName: litellm-masterkey
   masterkeySecretKey: masterkey
   environmentSecrets: [litellm-provider-keys]
   replicaCount: 1
   service: {type: ClusterIP, port: 4000}
   ingress: {enabled: false}
-  # The bundled PostgreSQL. This is the tier's database.
   postgresql:
     architecture: standalone
     image:
-      # Pinned: the subchart's default is bitnami/postgresql:latest, a moving
-      # tag whose major can change under an existing data volume.
+      # Pinned: the subchart default is :latest.
       registry: registry-1.docker.io
       repository: bitnamilegacy/postgresql
       tag: 17.6.0-debian-12-r4
     auth:
-      # litellm-helm renders litellm-dbcredentials from these two values and
-      # also writes `password` into the migration Job's DATABASE_URL as a plain
-      # value, so no Secret can hold it instead. Set both per environment;
-      # templates/validate.yaml rejects empty values and the upstream sample.
+      # Required per environment (validate.yaml); the subchart renders the Secret from them.
       existingSecret: litellm-dbcredentials
       password: ""
       postgres-password: ""
@@ -96,16 +68,9 @@ litellm:
       resources:
         requests: {cpu: 100m, memory: 256Mi}
         limits: {cpu: 500m, memory: 512Mi}
-  # No migration Job: the proxy applies its schema itself at startup
-  # (prisma migrate deploy). litellm-helm makes the Job an Argo CD PreSync
-  # hook, which on a first sync runs before this chart's PostgreSQL exists and
-  # never finishes; its annotations value lands on the pod, not the Job, so the
-  # hook cannot be changed from here. Without the hook it is a plain Job that
-  # ttlSecondsAfterFinished deletes and Argo CD re-creates in a loop.
+  # The proxy migrates at startup; the upstream Job is an Argo PreSync hook that never finishes here.
   migrationJob: {enabled: false}
-  # 15 minutes (90 x 10 s) instead of 5 to finish that migration: on a busy
-  # node it timed out and restarted, and every kill restarts it from scratch.
-  startupProbe: {failureThreshold: 90}
+  startupProbe: {failureThreshold: 90}   # 15 min for the first migration
   proxyConfigMap: {create: true, key: config.yaml}
   proxy_config:
     model_list:
@@ -116,8 +81,7 @@ litellm:
           api_base: https://api.mistral.ai/v1
   resources:
     requests: {cpu: 200m, memory: 512Mi}
-    # 1Gi is not enough — LiteLLM OOMKills on startup.
-    limits: {memory: 2Gi}
+    limits: {memory: 2Gi}   # 1Gi OOMKills on startup
 
 mlflow:
   fullnameOverride: mlflow
@@ -125,27 +89,13 @@ mlflow:
   service: {enabled: true, type: ClusterIP, port: 5000}
   backendStore:
     databaseMigration: false
-    # Upstream's default is ":memory:", which SQLAlchemy opens once per
-    # connection: tables and seeded data on one are missing on the next
-    # ("no such table: runs"). The file lives on the mlflow-data PVC
-    # (templates/mlflow-pvc.yaml, size in mlflowStorage below), so the seed
-    # survives a pod restart.
+    # SQLite on the mlflow-data PVC; upstream's :memory: loses tables between connections.
     defaultSqlitePath: /mlflow/data/mlflow.db
   extraVolumes:
     - {name: data, persistentVolumeClaim: {claimName: mlflow-data}}
   extraVolumeMounts:
     - {name: data, mountPath: /mlflow/data}
-  # The server migrates an older database itself only when a table is missing;
-  # otherwise it refuses to start ("Detected out-of-date database schema",
-  # mlflow/store/tracking/sqlalchemy_store.py in 3.16.0), so a release that
-  # only alters existing tables crash-loops on the existing PVC.
-  # backendStore.databaseMigration does not help: the subchart migrates only
-  # PostgreSQL, MySQL and MSSQL. This runs `mlflow db upgrade` on the SQLite
-  # file before the server starts (a no-op when current); on a first start
-  # there is no file and the server creates it. The subchart copies initContainers
-  # verbatim, so the image is a literal: keep it equal to the server's
-  # (tests/render-test.sh checks). uid 1001 like the server, so SQLite never
-  # leaves a file the server cannot write.
+  # The server refuses an out-of-date schema unless a table is missing. Image must equal the server's.
   initContainers:
     - name: db-upgrade
       image: burakince/mlflow:3.16.0
@@ -160,22 +110,11 @@ mlflow:
       volumeMounts:
         - {name: data, mountPath: /mlflow/data}
         - {name: tmp, mountPath: /tmp}
-  # One SQLite file on a ReadWriteOnce volume: the old pod must stop before
-  # the new one opens it. The subchart's fsGroup 1001 makes the volume
-  # writable for its uid 1001.
   strategy:
-    type: Recreate
-  # MLflow 3.x binds localhost-only and its security middleware rejects
-  # requests from anywhere else — including the kubelet's probes, so the
-  # container restarts forever. The chart already passes --host 0.0.0.0;
-  # allowed-hosts is the missing half.
-  #
-  # workers=1 because the chart defaults to 4 and each loads the full stack:
-  # four of them OOMKill inside 1Gi.
+    type: Recreate   # one SQLite file on a ReadWriteOnce volume
   extraArgs:
-    allowed-hosts: "*"
-    workers: "1"
-  # Keep BLAS from grabbing every core on a small node.
+    allowed-hosts: "*"   # else MLflow 3.x rejects the kubelet's probes
+    workers: "1"         # 4 workers OOMKill
   extraEnvVars:
     OPENBLAS_NUM_THREADS: "1"
     OMP_NUM_THREADS: "1"
@@ -186,37 +125,27 @@ mlflow:
     requests: {cpu: 200m, memory: 512Mi}
     limits: {cpu: 1000m, memory: 2Gi}
 
-# PVC mlflow-data, holding MLflow's SQLite store. A parent key: the mlflow
-# subchart's values schema rejects keys it does not define.
+# Size of PVC mlflow-data. Top-level: the mlflow subchart's schema rejects unknown keys.
 mlflowStorage: 1Gi
 
 mcpMock:
-  # Test double backing the catalog's mcp-servers plugin. Never in a release.
-  # Source: images/mcp-mock; published for amd64 and arm64 by
-  # .github/workflows/mcp-mock-image.yml as <appVersion>, sha-<commit>, main
-  # and latest; a published appVersion tag is immutable.
+  # Test double for the catalog's mcp-servers plugin (images/mcp-mock).
   image:
     registry: ghcr.io/naira-project
     repository: test-dependencies/mcp-mock
     tag: ""           # default: the chart's appVersion
-  # ghcr packages are private until made public. Until then the cluster needs
-  # a docker-registry Secret (read:packages) in this namespace, named here.
-  imagePullSecrets: []   # e.g. [{name: ghcr-pull}]
+  imagePullSecrets: []   # needed while the ghcr package is private, e.g. [{name: ghcr-pull}]
   port: 8080
   resources:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {cpu: 200m, memory: 128Mi}
 
-# ── sample data ───────────────────────────────────────────────────────────────
-# One Job per component (templates/seed.yaml), rendered only when the
-# component's tag is on too. Off by default; on in values-dev.yaml.
+# ── sample data (templates/seed.yaml) ─────────────────────────────────────────
 seed:
-  backoffLimit: 10       # retries with backoff while the server starts
+  backoffLimit: 10       # retries while the server starts
   mlflow:
     enabled: false
-    # The mlflow subchart's own image: it has mlflow, pandas and numpy, so
-    # nothing is installed at runtime. Keep in step with the subchart.
-    image: burakince/mlflow:3.16.0
+    image: burakince/mlflow:3.16.0   # keep equal to the mlflow subchart's image
   openmetadata:
     enabled: false
     image: python:3.13-slim
@@ -227,22 +156,15 @@ seed:
 
 # ── off by default ────────────────────────────────────────────────────────────
 
-# The dependency tier the OpenMetadata server needs. Airflow (ingestion
-# orchestration) is off: the Naira plugin only reads the REST API, Airflow
-# needs a ReadWriteMany volume kind cannot provide, and its memory pushed
-# OpenSearch into OOM on a single node.
+# Airflow off: the plugin only reads the REST API, and it needs ReadWriteMany.
 openmetadata-dependencies:
   airflow:
     enabled: false
   mysql:
     auth:
-      # Fixed so renders are deterministic (bitnami mysql otherwise generates
-      # random passwords on every render). Root/app-user passwords of a
-      # database that only OpenMetadata reaches; override per environment.
+      # Fixed: bitnami mysql otherwise generates passwords on every render.
       rootPassword: openmetadata-mysql-root
       password: openmetadata-mysql-user
-    # openmetadata_user exists only because of this script (upstream default,
-    # restated here so the password is visible next to secrets.openmetadataMysql).
     initdbScripts:
       init_openmetadata_db_scripts.sql: |
         CREATE DATABASE openmetadata_db;
@@ -250,16 +172,12 @@ openmetadata-dependencies:
         GRANT ALL PRIVILEGES ON openmetadata_db.* TO 'openmetadata_user'@'%' WITH GRANT OPTION;
         commit;
 
-# The server. Basic auth; the built-in `admin` user is created on first start
-# with password `admin` (upstream default, not configurable here) — the naira
-# chart's dev values log the plugin in with exactly that.
+# Built-in user admin/admin (upstream default).
 openmetadata:
-  fullnameOverride: openmetadata   # reachable as openmetadata.<namespace>.svc:8585
+  fullnameOverride: openmetadata
   openmetadata:
     config:
-      # No Airflow, so the server must not health-check a pipeline service.
-      # auth off as well: upstream still mounts the Airflow password Secret
-      # otherwise, and the pod never starts without it.
+      # No Airflow; with auth on, upstream mounts a Secret that does not exist.
       pipelineServiceClientConfig:
         enabled: false
         airflow:
@@ -267,24 +185,16 @@ openmetadata:
             enabled: false
 
 
-# kube-prometheus-stack: only what determinism needs. Grafana otherwise
-# generates a random admin password on every render, which an auto-synced
-# Application can never settle on. Override per environment.
 kube-prometheus-stack:
   grafana:
-    adminPassword: grafana-local-admin
+    adminPassword: grafana-local-admin   # fixed: generated otherwise on every render
 
 llamacpp:
-  # Pinned by digest: `server` is a moving tag, and one cluster ran two
-  # different builds under it (2026-10-13). This digest (multi-arch index) is
-  # the build verified on the sandbox; bump it deliberately.
+  # Pinned by digest: `server` moves.
   image: ghcr.io/ggml-org/llama.cpp:server@sha256:c789283572ba78c2699b8945a96e654c850f938a717883f2e6187a14adac698f
   downloadImage: curlimages/curl:8.11.1
   storage: 3Gi        # model cache PVC per model; a model's `storage` overrides it
-  # The download image runs unprivileged and a CSI-provisioned volume (EBS)
-  # is root-owned: without fsGroup the download fails with "Permission
-  # denied". kind's hostPath provisioner is world-writable and hides that.
-  fsGroup: 1000
+  fsGroup: 1000       # EBS volumes are root-owned; the download runs unprivileged
   # One Deployment and Service per entry. `name` is the Service name.
   models:
     - name: llama-qwen25-05b
@@ -305,19 +215,12 @@ llamacpp:
         limits: {cpu: 200m, memory: 128Mi}
 
 vllm:
-  # Pinned: `latest` moves. v0.31.0 is the multi-arch index latest pointed to
-  # on 2026-10-13; the digest makes the tag immutable here.
+  # Pinned by digest: `latest` moves.
   image: vllm/vllm-openai-cpu:v0.31.0@sha256:495c84fe30f3572b83a78100a1e8ba423dbb77fc532ecefebe114e6b77327bd9
   model: facebook/opt-125m
   servedModelName: opt-125m
   kvCacheSpace: "1"   # GiB of CPU KV cache
-  # --enforce-eager: no torch.compile warm-up. On a 1-CPU limit the warm-up ran
-  # past 3.5 minutes on top of a ~7-minute start (sandbox, v0.31.0); a test
-  # double does not need the faster kernels it buys.
-  enforceEager: true
-  # Requests are what it uses (sandbox, opt-125m, 1 GiB KV cache): about one
-  # CPU, and 3.1 GiB while still starting, when a c5a.large (3 GiB
-  # allocatable) evicted it. 4Gi keeps it off nodes that cannot hold it.
+  enforceEager: true  # skips the torch.compile warm-up, too slow on 1 CPU
   resources:
-    requests: {cpu: 1000m, memory: 4Gi}
+    requests: {cpu: 1000m, memory: 4Gi}   # measured: ~1 CPU, 3.1 GiB while starting
     limits: {cpu: 1000m, memory: 6Gi}

@@ -1,9 +1,4 @@
-# Render and lint fixture: the values of the RFC-009 PoC's Argo CD
-# Application, an install with the Secrets created from values and mcp-mock
-# from a separate registry. chart-testing lints the chart with every
-# ci/*-values.yaml; tests/render-test.sh renders this file too. Real
-# environments are Argo CD Applications in naira-project/test-infrastructure
-# (gitops/apps/<env>/). All credentials here are placeholders.
+# Lint/render fixture: the RFC-009 PoC Application's values. Placeholder credentials.
 tags:
   keycloak: true
   litellm: true
@@ -26,7 +21,6 @@ mcpMock:
 litellm:
   postgresql:
     auth:
-      # Required by the chart; the litellm-helm sample value is rejected.
       password: litellm-poc-postgres
       postgres-password: litellm-poc-postgres
 secrets:
@@ -38,6 +32,4 @@ secrets:
     data:
       MISTRAL_API_KEY: change-me
 mlflow:
-  # Pinned so renders are deterministic; otherwise selfHeal fights a key that
-  # changes on every render.
   flaskServerSecretKey: poc-flask-key

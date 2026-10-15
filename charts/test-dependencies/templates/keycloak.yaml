@@ -79,8 +79,7 @@ spec:
             periodSeconds: 20
             failureThreshold: 10
           resources: {{- toYaml .Values.keycloak.resources | nindent 12 }}
-          # The image runs as uid 1000. Root filesystem stays writable:
-          # start-dev keeps its H2 database under /opt/keycloak/data.
+          # uid 1000 from the image; root fs writable for start-dev's H2 database
           securityContext: {{- include "deps.securityContext" . | nindent 12 }}
       volumes:
         - name: realm-import

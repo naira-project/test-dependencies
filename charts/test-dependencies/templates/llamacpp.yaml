@@ -1,14 +1,6 @@
 {{/*
-llama.cpp: one Deployment, Service and model cache PVC per entry in
-llamacpp.models. An init container downloads the model file once; later starts
-find it cached. Mutually exclusive with vLLM (validate.yaml).
-
-One PVC per model, not one shared: a ReadWriteOnce volume (EBS) attaches to one
-node, so on a multi-node cluster the second model's pod waits forever for a
-volume another node holds. For the same reason a rollout stops the old pod
-before starting the new one (maxSurge 0). That is RollingUpdate, not Recreate:
-switching an existing Deployment to Recreate fails under server-side apply
-(Argo CD), which keeps the API server's defaulted rollingUpdate block.
+One Deployment, Service and PVC per model (RWO volumes attach to one node).
+maxSurge 0, not Recreate: switching to Recreate fails under Argo's server-side apply.
 */}}
 {{- if .Values.tags.llamacpp }}
 {{- range $i, $m := .Values.llamacpp.models }}
@@ -63,7 +55,7 @@ spec:
                 echo "{{ .name }} model already cached."
                 exit 0
               fi
-              # Download to a temp name so an interrupted transfer is not mistaken for a cached model.
+              # temp name: a partial download is never taken for a cached model
               curl -fL -o "$MODEL_PATH.part" {{ .downloadUrl | quote }}
               mv "$MODEL_PATH.part" "$MODEL_PATH"
           volumeMounts:
