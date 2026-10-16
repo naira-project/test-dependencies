@@ -174,22 +174,26 @@ check "no inference ServiceMonitor without monitoring" "" \
 OM=(--set tags.openmetadata=true)
 check "openmetadata off by default" "" \
   "$(render | yq 'select(.kind == "Deployment" and .metadata.name == "openmetadata") | .metadata.name')"
-check "openmetadata on: server, mysql, opensearch rendered" "mysql,openmetadata,opensearch" \
-  "$(render "${OM[@]}" | yq ea '[select((.kind == "Deployment" or .kind == "StatefulSet") and (.metadata.name == "openmetadata" or .metadata.name == "mysql" or .metadata.name == "opensearch")) | .metadata.name] | sort | join(",")')"
+check "openmetadata on: server and opensearch rendered, no mysql" "openmetadata,opensearch" \
+  "$(render "${OM[@]}" | yq ea '[select((.kind == "Deployment" or .kind == "StatefulSet") and (.metadata.name == "openmetadata" or (.metadata.name | test("mysql")) or .metadata.name == "opensearch")) | .metadata.name] | sort | join(",")')"
+check "openmetadata on: no bitnami image" "0" \
+  "$(render "${OM[@]}" | yq ea '[.. | select(has("image")) | .image | select(test("bitnami"))] | length')"
+check "openmetadata connects to its database on Naira's PostgreSQL" "postgres.idp-system.svc.cluster.local 5432 openmetadata postgresql" \
+  "$(render "${OM[@]}" | yq 'select(.kind == "Secret" and .data.DB_HOST != null) | .data | (.DB_HOST | @base64d) + " " + (.DB_PORT | @base64d) + " " + (.OM_DATABASE | @base64d) + " " + (.DB_SCHEME | @base64d)')"
 check "openmetadata on: no airflow" "0" \
   "$(render "${OM[@]}" | yq ea '[select(.kind == "Deployment" or .kind == "StatefulSet") | .metadata.name | select(test("airflow"))] | length')"
 check "openmetadata on: pipeline service client disabled" "false" \
   "$(render "${OM[@]}" | yq ea 'select(.kind == "Secret" and .data.PIPELINE_SERVICE_CLIENT_ENABLED != null) | .data.PIPELINE_SERVICE_CLIENT_ENABLED | @base64d' | tr -d '"')"
-check "openmetadata on: no mysql-secrets by default" "" \
-  "$(render "${OM[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "mysql-secrets") | .metadata.name')"
-must_fail "openmetadata: Secret password must match the init script" "does not match the password in openmetadata-dependencies.mysql.initdbScripts" \
-  "${OM[@]}" --set secrets.openmetadataMysql.create=true --set secrets.openmetadataMysql.password=pw1
-must_fail "openmetadata mysql Secret create rejects an empty password" "secrets.openmetadataMysql.password" \
-  "${OM[@]}" --set secrets.openmetadataMysql.create=true --set secrets.openmetadataMysql.password=""
+check "openmetadata on: no openmetadata-db Secret by default" "" \
+  "$(render "${OM[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "openmetadata-db") | .metadata.name')"
+must_fail "openmetadata-db create needs a password" "secrets.openmetadataDatabase.password is required" \
+  "${OM[@]}" --set secrets.openmetadataDatabase.create=true
+must_fail "openmetadata must not deploy its own MySQL" "openmetadata-dependencies.mysql.enabled must be false" \
+  "${OM[@]}" --set openmetadata-dependencies.mysql.enabled=true
 check "dev: openmetadata server references no Secret the release does not render" "" \
   "$(o=$(render "${DEV[@]}" "${OM[@]}"); comm -23 <(echo "$o" | yq ea 'select(.kind == "Deployment" and .metadata.name == "openmetadata") | [.spec.template.spec.initContainers[].env[]?, .spec.template.spec.containers[0].env[]?] | .[] | (.valueFrom.secretKeyRef.name // "")' | grep -v '^$' | sort -u) <(echo "$o" | yq ea 'select(.kind == "Secret") | .metadata.name' | sort -u) | paste -sd, -)"
-check "dev: mysql-secrets equals the password in the MySQL init script" "yes" \
-  "$(o=$(render "${DEV[@]}" "${OM[@]}"); a=$(echo "$o" | yq 'select(.kind == "Secret" and .metadata.name == "mysql-secrets") | .stringData["openmetadata-mysql-password"]'); b=$(echo "$o" | yq ea 'select(.kind == "ConfigMap" and .metadata.name == "mysql-init-scripts") | .data["init_openmetadata_db_scripts.sql"]' | sed -n "s/.*openmetadata_user'@'%' IDENTIFIED BY '\([^']*\)'.*/\1/p"); [ -n "$a" ] && [ "$a" = "$b" ] && echo yes || echo "no ($a vs $b)")"
+check "dev: openmetadata-db Secret matches the naira chart's values-dev.yaml" "openmetadata openmetadata-local-password" \
+  "$(render "${DEV[@]}" "${OM[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "openmetadata-db") | .stringData.username + " " + .stringData.password')"
 
 # litellm sample models (values-dev.yaml)
 LITELLM_CFG='select(.kind == "ConfigMap" and .metadata.name == "litellm-config") | .data["config.yaml"] | from_yaml'

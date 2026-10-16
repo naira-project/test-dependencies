@@ -1,5 +1,4 @@
 # test-dependencies: the third-party tier Naira talks to (RFC-009 §1).
-# No global.imageRegistry: it would also rewrite OpenMetadata's bitnami MySQL image.
 
 # One tag per component (tags, not conditions: see Chart.yaml).
 tags:
@@ -26,10 +25,12 @@ secrets:
     create: false
     username: litellm
     password: ""
-  # Must equal the literal in openmetadata-dependencies.mysql.initdbScripts (validate.yaml checks).
-  openmetadataMysql:
+  # Secret openmetadata-db (keys username, password). Password must equal the
+  # naira chart's database.databases.openmetadata password.
+  openmetadataDatabase:
     create: false
-    password: openmetadata_password
+    username: openmetadata
+    password: ""
 
 # ── on by default ─────────────────────────────────────────────────────────────
 
@@ -157,26 +158,35 @@ seed:
 # ── off by default ────────────────────────────────────────────────────────────
 
 # Airflow off: the plugin only reads the REST API, and it needs ReadWriteMany.
+# MySQL off: OpenMetadata uses its own database on Naira's PostgreSQL.
 openmetadata-dependencies:
   airflow:
     enabled: false
   mysql:
-    auth:
-      # Fixed: bitnami mysql otherwise generates passwords on every render.
-      rootPassword: openmetadata-mysql-root
-      password: openmetadata-mysql-user
-    initdbScripts:
-      init_openmetadata_db_scripts.sql: |
-        CREATE DATABASE openmetadata_db;
-        CREATE USER 'openmetadata_user'@'%' IDENTIFIED BY 'openmetadata_password';
-        GRANT ALL PRIVILEGES ON openmetadata_db.* TO 'openmetadata_user'@'%' WITH GRANT OPTION;
-        commit;
+    enabled: false
 
 # Built-in user admin/admin (upstream default).
 openmetadata:
   fullnameOverride: openmetadata
   openmetadata:
     config:
+      # Own database on Naira's PostgreSQL, created by the naira chart's db-init Job
+      # (database.databases.openmetadata). Install naira first.
+      database:
+        host: postgres.idp-system.svc.cluster.local
+        port: 5432
+        driverClass: org.postgresql.Driver
+        dbScheme: postgresql
+        databaseName: openmetadata
+        auth:
+          username: openmetadata
+          password: {secretRef: openmetadata-db, secretKey: password}
+        dbParams: sslmode=disable
+        # Main pool only (upstream 10-50); OpenMetadata opens ~17 more outside it.
+        # The shared server allows 100 (LiteLLM and the catalog included).
+        initialSize: 2
+        minSize: 2
+        maxSize: 10
       # No Airflow; with auth on, upstream mounts a Secret that does not exist.
       pipelineServiceClientConfig:
         enabled: false

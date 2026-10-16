@@ -33,9 +33,11 @@ secrets:
   litellmDatabase:
     create: true
     password: litellm-local-password
-  # Ready for `--set tags.openmetadata=true`.
-  openmetadataMysql:
+  # Ready for `--set tags.openmetadata=true`. Equals the naira chart's
+  # values-dev.yaml database.databases.openmetadata password.
+  openmetadataDatabase:
     create: true
+    password: openmetadata-local-password
 
 litellm:
   # Sample catalog content for the litellm plugins. Replaces values.yaml's list.
@@ -101,10 +103,6 @@ seed:
     enabled: true   # renders only with tags.openmetadata
 
 openmetadata-dependencies:
-  mysql:
-    primary:
-      persistence:
-        size: 2Gi
   opensearch:
     persistence:
       size: 2Gi

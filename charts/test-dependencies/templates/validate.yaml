@@ -11,11 +11,7 @@
 {{- fail "litellm.db.deployStandalone must be false: LiteLLM uses Naira's PostgreSQL (litellm.db.*)" }}
 {{- end }}
 
-{{- /* The Secret must carry the init script's literal password. */}}
-{{- if and .Values.tags.openmetadata .Values.secrets.openmetadataMysql.create }}
-{{- $pw := .Values.secrets.openmetadataMysql.password }}
-{{- $sql := index .Values "openmetadata-dependencies" "mysql" "initdbScripts" "init_openmetadata_db_scripts.sql" | default "" }}
-{{- if not (contains (printf "IDENTIFIED BY '%s'" $pw) $sql) }}
-{{- fail "secrets.openmetadataMysql.password does not match the password in openmetadata-dependencies.mysql.initdbScripts" }}
-{{- end }}
+{{- /* OpenMetadata must not bring its own MySQL. */}}
+{{- if and .Values.tags.openmetadata (index .Values "openmetadata-dependencies" "mysql" "enabled") }}
+{{- fail "openmetadata-dependencies.mysql.enabled must be false: OpenMetadata uses Naira's PostgreSQL (openmetadata.openmetadata.config.database)" }}
 {{- end }}

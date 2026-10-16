@@ -33,7 +33,7 @@ none of this needs; `values-dev.yaml` adds what a local Naira needs.
 | `mcpMock` | `mcp-mock` | off | on |
 | `llamacpp` | llama.cpp, one Deployment per model | off | on |
 | `vllm` | vLLM (exclusive with `llamacpp`) | off | off |
-| `openmetadata` | OpenMetadata with MySQL and OpenSearch | off | off |
+| `openmetadata` | OpenMetadata with OpenSearch; its database is on Naira's PostgreSQL | off | off |
 | `monitoring` | kube-prometheus-stack and the ServiceMonitors | off | off |
 
 ## Requirements and Setup
@@ -66,7 +66,7 @@ about 4 CPUs and 8 GiB.
 
 3. Install the naira chart into `idp-system`, the only namespace its UI works
    in for now. It runs the PostgreSQL server that LiteLLM uses, and its
-   `db-init` Job creates the `litellm` database. Its defaults already address
+   `db-init` Job creates the `litellm` and `openmetadata` databases. Its defaults already address
    this chart in `naira-deps`; only the development Secrets are set. The
    OpenMetadata plugin is off because `values-dev.yaml` leaves OpenMetadata
    off. Needs a naira release that ships PostgreSQL.
@@ -87,6 +87,9 @@ about 4 CPUs and 8 GiB.
      --set database.databases.litellm.enabled=true \
      --set database.databases.litellm.secret.create=true \
      --set database.databases.litellm.secret.password=litellm-local-password \
+     --set database.databases.openmetadata.enabled=true \
+     --set database.databases.openmetadata.secret.create=true \
+     --set database.databases.openmetadata.secret.password=openmetadata-local-password \
      --wait --timeout 10m
    ```
 

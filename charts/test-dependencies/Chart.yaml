@@ -18,7 +18,7 @@ dependencies:
     version: "1.11.7"
     repository: https://community-charts.github.io/helm-charts
     tags: [mlflow]
-  # OpenMetadata: dependencies (MySQL, OpenSearch) and server, one tag.
+  # OpenMetadata: dependencies (OpenSearch; MySQL off) and server, one tag.
   - name: openmetadata-dependencies
     version: "2.0.1"
     repository: https://helm.open-metadata.org
