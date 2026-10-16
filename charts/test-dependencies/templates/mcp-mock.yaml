@@ -26,6 +26,12 @@ spec:
           image: {{ $img | quote }}
           ports:
             - {containerPort: {{ .Values.mcpMock.port }}, name: http}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
           resources: {{- toYaml .Values.mcpMock.resources | nindent 12 }}
           securityContext:
             {{- include "deps.securityContext" . | nindent 12 }}
