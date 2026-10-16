@@ -1,0 +1,106 @@
+# SPDX-FileCopyrightText: 2026 Naira Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# mcp-mock (dev only), amd64+arm64, published on main as the chart's appVersion.
+# A published appVersion is never overwritten: image changes need an appVersion bump.
+name: mcp-mock image
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "images/mcp-mock/**"
+      - "charts/test-dependencies/Chart.yaml"
+      - ".github/workflows/mcp-mock-image.yml"
+  push:
+    branches: [main]
+    paths:
+      - "images/mcp-mock/**"
+      - "charts/test-dependencies/Chart.yaml"
+      - ".github/workflows/mcp-mock-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/naira-project/test-dependencies/mcp-mock
+
+jobs:
+  version:
+    name: appVersion
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      app-version: ${{ steps.check.outputs.app-version }}
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Log in to ghcr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+      - name: Build only if the image or its tag is new
+        id: check
+        env:
+          # Empty on workflow_dispatch; all zeros on a branch's first push.
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          APP_VERSION=$(yq '.appVersion' charts/test-dependencies/Chart.yaml)
+          echo "app-version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
+          if [ -z "${BASE}" ] || [ "${BASE}" = "0000000000000000000000000000000000000000" ] \
+            || ! git diff --quiet "${BASE}" HEAD -- images/mcp-mock; then
+            changed=true
+          else
+            changed=false
+          fi
+          if docker manifest inspect "${IMAGE}:${APP_VERSION}" >/dev/null 2>&1; then
+            if [ "${changed}" = true ]; then
+              echo "::error::${IMAGE}:${APP_VERSION} already exists; bump appVersion in charts/test-dependencies/Chart.yaml"
+              exit 1
+            fi
+            echo "::notice::${IMAGE}:${APP_VERSION} already published and images/mcp-mock is unchanged; nothing to build"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build
+    needs: version
+    if: github.event_name == 'pull_request' && needs.version.outputs.build == 'true'
+    permissions:
+      contents: read
+    uses: naira-project/naira-github-workflows/.github/workflows/reusable-container-build-only.yml@47828e26feb1a916603512312148622613d5bd26
+    with:
+      image-name: test-dependencies/mcp-mock
+      dockerfile: images/mcp-mock/Dockerfile
+      context: images/mcp-mock
+
+  publish:
+    name: Build and push
+    needs: version
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.version.outputs.build == 'true'
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: naira-project/naira-github-workflows/.github/workflows/reusable-container-build.yml@47828e26feb1a916603512312148622613d5bd26
+    with:
+      image-name: test-dependencies/mcp-mock
+      dockerfile: images/mcp-mock/Dockerfile
+      context: images/mcp-mock
+      image-tag: ${{ needs.version.outputs.app-version }}
+    secrets:
+      registry-password: ${{ secrets.GITHUB_TOKEN }}

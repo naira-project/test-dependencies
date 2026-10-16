@@ -1,0 +1,14 @@
+{{/* MLflow's SQLite store, mounted via mlflow.extraVolumes. */}}
+{{- if .Values.tags.mlflow }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mlflow-data
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "deps.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.mlflowStorage }}
+{{- end }}

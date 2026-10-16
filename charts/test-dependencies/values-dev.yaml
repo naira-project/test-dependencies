@@ -1,0 +1,108 @@
+# Single-node kind/colima, alongside the Naira chart. All credentials are placeholders.
+
+tags:
+  keycloak: true
+  litellm: true
+  mlflow: true
+  mcpMock: true
+  openmetadata: false
+  monitoring: false
+  llamacpp: true
+  vllm: false
+
+keycloak:
+  admin:
+    create: true
+    username: admin
+    password: admin
+
+secrets:
+  litellmMasterkey:
+    create: true
+    value: sk-local-litellm
+  litellmProviderKeys:
+    create: true
+    data:
+      # Fake: listing models never calls the provider.
+      MISTRAL_API_KEY: change-me
+      OPENAI_API_KEY: change-me
+      ANTHROPIC_API_KEY: change-me
+      GEMINI_API_KEY: change-me
+      OPENROUTER_API_KEY: change-me
+  # Equals the naira chart's values-dev.yaml database.databases.litellm password.
+  litellmDatabase:
+    create: true
+    password: litellm-local-password
+  # Ready for `--set tags.openmetadata=true`. Equals the naira chart's
+  # values-dev.yaml database.databases.openmetadata password.
+  openmetadataDatabase:
+    create: true
+    password: openmetadata-local-password
+
+litellm:
+  # Sample catalog content for the litellm plugins. Replaces values.yaml's list.
+  proxy_config:
+    model_list:
+      - model_name: chat-small
+        litellm_params:
+          model: mistral/mistral-small-latest
+          api_key: os.environ/MISTRAL_API_KEY
+          api_base: https://api.mistral.ai/v1
+      - model_name: idp-gpt-4o-mini
+        litellm_params:
+          model: openai/gpt-4o-mini
+          api_key: os.environ/OPENAI_API_KEY
+          api_base: https://api.openai.com/v1
+      - model_name: idp-claude-sonnet
+        litellm_params:
+          model: anthropic/claude-3-5-sonnet-latest
+          api_key: os.environ/ANTHROPIC_API_KEY
+          api_base: https://api.anthropic.com
+          region_name: us-east-1
+      - model_name: idp-claude-sonnet
+        litellm_params:
+          model: anthropic/claude-3-5-sonnet-latest
+          api_key: os.environ/ANTHROPIC_API_KEY
+          api_base: https://api.anthropic.com
+          region_name: eu-central-1
+      - model_name: idp-gemini-flash
+        litellm_params:
+          model: gemini/gemini-2.0-flash
+          api_key: os.environ/GEMINI_API_KEY
+          api_base: https://generativelanguage.googleapis.com
+      - model_name: idp-embedding-small
+        litellm_params:
+          model: openai/text-embedding-3-small
+          api_key: os.environ/OPENAI_API_KEY
+          api_base: https://api.openai.com/v1
+      - model_name: openrouter-gpt-3.5-turbo
+        litellm_params:
+          model: openrouter/openai/gpt-3.5-turbo
+          api_key: os.environ/OPENROUTER_API_KEY
+          api_base: https://openrouter.ai/api/v1
+      - model_name: idp-llama-qwen25-05b
+        litellm_params:
+          # local llama.cpp (tags.llamacpp)
+          model: openai/qwen2.5-0.5b-instruct
+          api_base: http://llama-qwen25-05b:8080/v1
+    litellm_settings:
+      prometheus_initialize_budget_metrics: true
+    mcp_servers:
+      mock_kb:
+        url: http://mcp-mock:8080/mcp
+        transport: http
+        description: Mock MCP server for local development
+
+mlflow:
+  flaskServerSecretKey: local-dev-flask-key   # fixed: generated otherwise on every render
+
+seed:
+  mlflow:
+    enabled: true
+  openmetadata:
+    enabled: true   # renders only with tags.openmetadata
+
+openmetadata-dependencies:
+  opensearch:
+    persistence:
+      size: 2Gi

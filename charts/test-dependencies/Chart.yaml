@@ -1,0 +1,33 @@
+apiVersion: v2
+name: test-dependencies
+description: Third-party components Naira talks to but does not ship (RFC-009 §1)
+type: application
+# Versioned independently of Naira (RFC-009 §1).
+version: 0.1.0
+appVersion: "0.1.0"
+
+# Tags, not conditions: a condition's `enabled` key fails strict subchart schemas (mlflow).
+dependencies:
+  # No PostgreSQL: LiteLLM uses its own database on Naira's server (litellm.db.*).
+  - name: litellm-helm
+    alias: litellm
+    version: "1.82.3"
+    repository: oci://docker.litellm.ai/berriai
+    tags: [litellm]
+  - name: mlflow
+    version: "1.11.7"
+    repository: https://community-charts.github.io/helm-charts
+    tags: [mlflow]
+  # OpenMetadata: dependencies (OpenSearch; MySQL off) and server, one tag.
+  - name: openmetadata-dependencies
+    version: "2.0.1"
+    repository: https://helm.open-metadata.org
+    tags: [openmetadata]
+  - name: openmetadata
+    version: "2.0.1"
+    repository: https://helm.open-metadata.org
+    tags: [openmetadata]
+  - name: kube-prometheus-stack
+    version: "91.2.0"
+    repository: https://prometheus-community.github.io/helm-charts
+    tags: [monitoring]

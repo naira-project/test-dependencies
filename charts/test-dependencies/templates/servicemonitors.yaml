@@ -1,0 +1,39 @@
+{{- if and .Values.tags.monitoring .Values.tags.litellm }}
+{{/* Same tag as kube-prometheus-stack, so the CRs never precede its CRDs. */}}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: litellm
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "deps.labels" . | nindent 4 }}
+    # Prometheus selects ServiceMonitors by this label
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: litellm}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+{{- end }}
+{{- if and .Values.tags.monitoring (or .Values.tags.llamacpp .Values.tags.vllm) }}
+---
+# Whichever backend is on: both Services carry the `inference` label.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: inference
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "deps.labels" . | nindent 4 }}
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/component: inference}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+{{- end }}
