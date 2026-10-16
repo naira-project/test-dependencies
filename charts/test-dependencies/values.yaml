@@ -1,10 +1,10 @@
 # test-dependencies: the third-party tier Naira talks to (RFC-009 §1).
-# No global.imageRegistry: it would also rewrite bitnami PostgreSQL's images.
+# No global.imageRegistry: it would also rewrite OpenMetadata's bitnami MySQL image.
 
 # One tag per component (tags, not conditions: see Chart.yaml).
 tags:
   keycloak: true
-  litellm: true          # includes its own PostgreSQL
+  litellm: true          # database on Naira's PostgreSQL
   mlflow: true
   mcpMock: false          # test double; on in values-dev.yaml
   openmetadata: false
@@ -20,6 +20,12 @@ secrets:
   litellmProviderKeys:
     create: false
     data: {}
+  # Secret litellm-db (keys username, password). Password must equal the naira
+  # chart's database.databases.litellm password.
+  litellmDatabase:
+    create: false
+    username: litellm
+    password: ""
   # Must equal the literal in openmetadata-dependencies.mysql.initdbScripts (validate.yaml checks).
   openmetadataMysql:
     create: false
@@ -52,22 +58,14 @@ litellm:
   replicaCount: 1
   service: {type: ClusterIP, port: 4000}
   ingress: {enabled: false}
-  postgresql:
-    architecture: standalone
-    image:
-      # Pinned: the subchart default is :latest.
-      registry: registry-1.docker.io
-      repository: bitnamilegacy/postgresql
-      tag: 17.6.0-debian-12-r4
-    auth:
-      # Required per environment (validate.yaml); the subchart renders the Secret from them.
-      existingSecret: litellm-dbcredentials
-      password: ""
-      postgres-password: ""
-    primary:
-      resources:
-        requests: {cpu: 100m, memory: 256Mi}
-        limits: {cpu: 500m, memory: 512Mi}
+  # Own database on Naira's PostgreSQL, created by the naira chart's db-init Job
+  # (database.databases.litellm). Install naira first; LiteLLM retries until then.
+  db:
+    deployStandalone: false
+    useExisting: true
+    endpoint: postgres.idp-system.svc.cluster.local:5432
+    database: litellm
+    secret: {name: litellm-db, usernameKey: username, passwordKey: password}
   # The proxy migrates at startup; the upstream Job is an Argo PreSync hook that never finishes here.
   migrationJob: {enabled: false}
   startupProbe: {failureThreshold: 90}   # 15 min for the first migration

@@ -18,11 +18,6 @@ mcpMock:
     registry: naira-poc-registry:5000
     repository: naira-mcp-mock
     tag: 0.1.0-poc
-litellm:
-  postgresql:
-    auth:
-      password: litellm-poc-postgres
-      postgres-password: litellm-poc-postgres
 secrets:
   litellmMasterkey:
     create: true
@@ -31,5 +26,8 @@ secrets:
     create: true
     data:
       MISTRAL_API_KEY: change-me
+  litellmDatabase:
+    create: true
+    password: litellm-poc-password
 mlflow:
   flaskServerSecretKey: poc-flask-key

@@ -8,7 +8,7 @@ appVersion: "0.1.0"
 
 # Tags, not conditions: a condition's `enabled` key fails strict subchart schemas (mlflow).
 dependencies:
-  # PostgreSQL comes from this subchart (litellm.postgresql.*).
+  # No PostgreSQL: LiteLLM uses its own database on Naira's server (litellm.db.*).
   - name: litellm-helm
     alias: litellm
     version: "1.82.3"

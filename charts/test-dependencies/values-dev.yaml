@@ -29,15 +29,15 @@ secrets:
       ANTHROPIC_API_KEY: change-me
       GEMINI_API_KEY: change-me
       OPENROUTER_API_KEY: change-me
+  # Equals the naira chart's values-dev.yaml database.databases.litellm password.
+  litellmDatabase:
+    create: true
+    password: litellm-local-password
   # Ready for `--set tags.openmetadata=true`.
   openmetadataMysql:
     create: true
 
 litellm:
-  postgresql:
-    auth:
-      password: litellm-local-postgres
-      postgres-password: litellm-local-postgres
   # Sample catalog content for the litellm plugins. Replaces values.yaml's list.
   proxy_config:
     model_list:

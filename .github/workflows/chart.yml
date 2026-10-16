@@ -100,6 +100,14 @@ jobs:
         run: |
           docker build -t mcp-mock:ci images/mcp-mock
           kind load docker-image mcp-mock:ci --name chart-testing
+      - name: PostgreSQL for LiteLLM
+        # Stand-in for the naira chart's server and its litellm database (same chart, Service and namespace).
+        run: |
+          helm install postgres oci://registry-1.docker.io/cloudpirates/postgres --version 0.21.2 \
+            -n idp-system --create-namespace --set fullnameOverride=postgres --set auth.password=ci-admin \
+            --set customUser.name=litellm --set customUser.database=litellm \
+            --set "customUser.password=$(yq '.secrets.litellmDatabase.password' charts/test-dependencies/values-dev.yaml)"
+          kubectl -n idp-system rollout status statefulset/postgres --timeout=5m
       - name: Install
         run: |
           # kubectl wait, not --wait: LiteLLM's first migration outlasts it.

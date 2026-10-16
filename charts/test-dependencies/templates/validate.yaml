@@ -6,14 +6,9 @@
 {{- fail "keycloak.admin: set existingSecret or create, not both" }}
 {{- end }}
 
-{{- /* LiteLLM's PostgreSQL passwords: required, not the upstream sample. */}}
-{{- if .Values.tags.litellm }}
-{{- range $k := list "password" "postgres-password" }}
-{{- $v := index $.Values.litellm.postgresql.auth $k | default "" }}
-{{- if or (eq $v "") (eq $v "NoTaGrEaTpAsSwOrD") }}
-{{- fail (printf "litellm.postgresql.auth.%s is required and must not be the litellm-helm sample value" $k) }}
-{{- end }}
-{{- end }}
+{{- /* LiteLLM must not bring its own PostgreSQL. */}}
+{{- if and .Values.tags.litellm .Values.litellm.db.deployStandalone }}
+{{- fail "litellm.db.deployStandalone must be false: LiteLLM uses Naira's PostgreSQL (litellm.db.*)" }}
 {{- end }}
 
 {{- /* The Secret must carry the init script's literal password. */}}

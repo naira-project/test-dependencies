@@ -5,8 +5,7 @@ set -euo pipefail
 CHART="$(cd "$(dirname "$0")/.." && pwd)"
 fail=0
 
-# Defaults need the LiteLLM PostgreSQL passwords to render.
-render() { helm template t "$CHART" --namespace deps --set litellm.postgresql.auth.password=test-pg --set litellm.postgresql.auth.postgres-password=test-pg "$@"; }
+render() { helm template t "$CHART" --namespace deps "$@"; }
 
 check() {
   if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: expected '$2', got '$3'"; fail=1; fi
@@ -44,9 +43,19 @@ check "provider keys Secret when create=true" "k1" \
 must_fail "masterkey create needs a value" "secrets.litellmMasterkey.value is required" \
   --set secrets.litellmMasterkey.create=true
 
-# bitnami PostgreSQL must not render its own (random) Secret
-check "postgres reuses litellm-dbcredentials" "" \
-  "$(render | yq 'select(.kind == "Secret" and (.metadata.name | test("postgresql"))) | .metadata.name')"
+# LiteLLM's database is on Naira's PostgreSQL
+check "no PostgreSQL objects" "0" \
+  "$(render | yq ea '[select(.metadata.name | test("postgres"))] | length')"
+check "litellm connects to Naira's PostgreSQL" "postgres.idp-system.svc.cluster.local:5432 litellm" \
+  "$(render | yq "$LITELLM | (.env[] | select(.name == \"DATABASE_HOST\") | .value) + \" \" + (.env[] | select(.name == \"DATABASE_NAME\") | .value)")"
+check "litellm reads its database credentials from litellm-db" "litellm-db litellm-db" \
+  "$(render | yq ea "$LITELLM | [.env[] | select(.name == \"DATABASE_USERNAME\" or .name == \"DATABASE_PASSWORD\") | .valueFrom.secretKeyRef.name] | join(\" \")")"
+check "no generated litellm-db Secret by default" "" \
+  "$(render | yq 'select(.kind == "Secret" and .metadata.name == "litellm-db") | .metadata.name')"
+must_fail "litellm-db create needs a password" "secrets.litellmDatabase.password is required" \
+  --set secrets.litellmDatabase.create=true
+must_fail "litellm must not deploy its own PostgreSQL" "litellm.db.deployStandalone must be false" \
+  --set litellm.db.deployStandalone=true
 # Only mlflow's flask key may differ between two default renders
 a=$(mktemp); b=$(mktemp); render > "$a"; render > "$b"
 changed=""
@@ -88,14 +97,8 @@ check "dev+monitoring: two renders are identical" "yes" "$(cmp -s "$a" "$b" && e
 rm -f "$a" "$b"
 check "ServiceMonitor for litellm is absent when litellm is off" "" \
   "$(render --set tags.monitoring=true --set tags.litellm=false | yq ea 'select(.kind == "ServiceMonitor" and .metadata.name == "litellm") | .metadata.name')"
-check "dev: postgres image is pinned" "registry-1.docker.io/bitnamilegacy/postgresql:17.6.0-debian-12-r4" \
-  "$(render "${DEV[@]}" | yq ea 'select(.kind == "StatefulSet" and (.metadata.name | test("postgresql"))) | .spec.template.spec.containers[0].image')"
-check "dev: postgres password is the configured one, not the upstream sample" "litellm-local-postgres" \
-  "$(helm template t "$CHART" --namespace deps "${DEV[@]}" | yq ea 'select(.kind == "Secret" and .metadata.name == "litellm-dbcredentials") | .data.password' | base64 -d)"
-must_fail "postgres password required" "litellm.postgresql.auth.password is required" \
-  --set litellm.postgresql.auth.password=""
-must_fail "postgres password must not be the upstream sample" "must not be the litellm-helm sample" \
-  --set litellm.postgresql.auth.postgres-password=NoTaGrEaTpAsSwOrD
+check "dev: litellm-db Secret matches the naira chart's values-dev.yaml" "litellm litellm-local-password" \
+  "$(render "${DEV[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "litellm-db") | .stringData.username + " " + .stringData.password')"
 
 # keycloak admin Secret
 must_fail "keycloak admin create needs a username" "keycloak.admin.username is required" \
