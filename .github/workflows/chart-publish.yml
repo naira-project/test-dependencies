@@ -7,7 +7,6 @@ name: Chart publish
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -27,7 +26,6 @@ jobs:
         with:
           version: v4.3.0
       - name: Tag matches chart version
-        if: github.ref_type == 'tag'
         run: |
           VERSION=$(yq '.version' charts/test-dependencies/Chart.yaml)
           if [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
@@ -45,5 +43,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "${GITHUB_TOKEN}" | helm registry login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          VERSION=$(yq '.version' charts/test-dependencies/Chart.yaml)
+          # ghcr tags are mutable: never overwrite a published version
+          if helm show chart oci://ghcr.io/naira-project/charts/test-dependencies --version "${VERSION}" >/dev/null 2>&1; then
+            echo "::error::test-dependencies ${VERSION} is already published; bump version in Chart.yaml"
+            exit 1
+          fi
           helm package charts/test-dependencies
           helm push test-dependencies-*.tgz oci://ghcr.io/naira-project/charts
