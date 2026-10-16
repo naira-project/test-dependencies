@@ -28,6 +28,15 @@ dependencies:
     version: "1.11.7"
     repository: https://community-charts.github.io/helm-charts
     tags: [mlflow]
+  # Langfuse brings PostgreSQL, Valkey and SeaweedFS as subcharts. Its
+  # ClickHouse is switched off and templates/clickhouse.yaml renders one
+  # instead: chart 2.x builds it from ClickHouseCluster and KeeperCluster CRs,
+  # which would make the ClickHouse operator and cert-manager prerequisites of
+  # this chart. Off by default for its size; see values.yaml.
+  - name: langfuse
+    version: "2.1.5"
+    repository: https://langfuse.github.io/langfuse-k8s
+    tags: [langfuse]
   # OpenMetadata is two upstream charts on one tag: the dependencies chart
   # (MySQL, OpenSearch; Airflow disabled in values.yaml) and the server. Off by
   # default — it is heavy for a single kind node alongside the rest.

@@ -15,6 +15,7 @@ tags:
   litellm: true          # includes its own PostgreSQL
   mlflow: true
   mcpMock: false          # test double; on in values-dev.yaml
+  langfuse: false        # Langfuse, its three bundled stores and ClickHouse
   openmetadata: false
   monitoring: false      # kube-prometheus-stack AND the ServiceMonitors
   llamacpp: false
@@ -38,6 +39,20 @@ secrets:
   openmetadataMysql:
     create: false
     password: openmetadata_password
+  # Secret `langfuse-app-credentials`, read through the secretKeyRefs in the
+  # langfuse block below. The subchart would otherwise generate all three with
+  # `randAlphaNum`, re-rolled on every render — and a rotated SALT or
+  # ENCRYPTION_KEY orphans every row written under the old one.
+  langfuseApp:
+    create: false
+    salt: ""            # `openssl rand -base64 32`
+    encryptionKey: ""   # 64 hex chars — `openssl rand -hex 32`
+    nextauthSecret: ""  # `openssl rand -base64 32`
+  # Secret `clickhouse-auth` (key password), read by both ends: the ClickHouse
+  # StatefulSet this chart renders and the Langfuse pods that connect to it.
+  clickhouseAuth:
+    create: false
+    password: ""
 
 # ── on by default ─────────────────────────────────────────────────────────────
 
@@ -191,6 +206,137 @@ seed:
     limits: {cpu: 500m, memory: 512Mi}
 
 # ── off by default ────────────────────────────────────────────────────────────
+
+# ClickHouse, for Langfuse. Rendered here (templates/clickhouse.yaml) and not
+# by the langfuse subchart, whose ClickHouse is a pair of operator CRs — that
+# would make the ClickHouse operator and cert-manager prerequisites of this
+# chart. Rides tags.langfuse; deploy: false points Langfuse at a ClickHouse you
+# already run (langfuse.clickhouse.host below must name it).
+clickhouse:
+  deploy: true
+  # What Langfuse recommends for 4.x, the version its operator CRs pin too.
+  # Moves with the subchart.
+  image: clickhouse/clickhouse-server:26.4
+  # Fixed in the image (`useradd --uid=101`), deliberately, so that volume
+  # ownership can be arranged from outside. Must match it; not a knob.
+  uid: 101
+  # Kept equal to langfuse.clickhouse.auth.username and .database by hand —
+  # Helm cannot template subchart values. validate.yaml rejects a drifted pair.
+  user: default
+  database: default
+  storage: 10Gi
+  resources:
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {memory: 2Gi}
+
+# Langfuse — LLM observability, the tier's counterpart to LiteLLM's gateway.
+# PostgreSQL, Valkey and SeaweedFS ride along as subcharts; ClickHouse is this
+# chart's own, above. Off by default for its size: six workloads, four of them
+# on persistent volumes.
+langfuse:
+  # The web UI is langfuse-web.<namespace>.svc:3000.
+  fullnameOverride: langfuse
+  langfuse:
+    # The three credentials Langfuse cannot regenerate (secrets.langfuseApp).
+    # Always by reference, whether or not this chart creates that Secret:
+    # pointing at it is what stops the subchart generating them.
+    salt:
+      secretKeyRef: {name: langfuse-app-credentials, key: salt}
+    encryptionKey:
+      secretKeyRef: {name: langfuse-app-credentials, key: encryption-key}
+    nextauth:
+      # Browser-facing, same rule as keycloak.hostname: port-forwarded wherever
+      # a laptop reaches it.
+      url: http://localhost:3002
+      secret:
+        secretKeyRef: {name: langfuse-app-credentials, key: nextauth-secret}
+    features:
+      # A test tier does not report usage to langfuse.com.
+      telemetryEnabled: false
+    image:
+      # The tag is already pinned to appVersion
+      pullPolicy: IfNotPresent
+    extraInitContainers:
+      - name: wait-for-postgresql
+        image: postgres:18
+        command: ["sh", "-c", "until pg_isready -h langfuse-postgresql -p 5432; do sleep 2; done"]
+        resources:
+          requests: {cpu: 10m, memory: 32Mi}
+          limits: {memory: 64Mi}
+    web:
+      livenessProbe:
+        failureThreshold: 30
+      resources:
+        requests: {cpu: 200m, memory: 1Gi}
+        limits: {memory: 2Gi}
+    worker:
+      livenessProbe:
+        # The worker does not exit, it answers 500 while it waits on web's
+        # ClickHouse migrations — long enough for upstream's threshold to kill
+        # it. Measured: one restart before this, none after.
+        failureThreshold: 30
+      resources:
+        requests: {cpu: 200m, memory: 768Mi}   # measured ~565Mi idle
+        limits: {memory: 2Gi}
+  # Langfuse's own PostgreSQL, separate from litellm's. fullnameOverride is not
+  # cosmetic: both subcharts default to <release>-postgresql, so with both tags
+  # on the StatefulSets and Services collide and the install is rejected. The
+  # other two stores are renamed for symmetry; langfuse resolves its hostnames
+  # through these same keys.
+  postgresql:
+    fullnameOverride: langfuse-postgresql
+    auth:
+      # The bundled stores' passwords, generated with `randAlphaNum` when left
+      # empty — kept by `lookup` on a live upgrade, but re-rolled by any render
+      # that cannot read the cluster, which is every Argo CD diff. Set per
+      # environment; templates/validate.yaml rejects the empty value. Not held
+      # in a Secret of this chart's making — langfuse bootstraps its subcharts
+      # from Secrets it writes itself, so `existingSecret` would mean
+      # rebuilding them.
+      password: ""
+    storage:
+      requestedSize: 5Gi
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {memory: 512Mi}
+  redis:
+    fullnameOverride: langfuse-valkey
+    auth:
+      password: ""
+    dataStorage:
+      requestedSize: 2Gi
+    resources:
+      requests: {cpu: 50m, memory: 128Mi}
+      limits: {memory: 256Mi}
+  s3:
+    fullnameOverride: langfuse-s3
+    auth:
+      rootPassword: ""
+    # Not pinnable, unlike the passwords above: seaweedfs renders an SFTP Secret
+    # whenever allInOne is on (sftp.enabled stays false, no SFTP pod is ever
+    # created) and generates its three passwords with no values hook to supply
+    # them. So `langfuse-s3-sftp-secret` is the one object in a langfuse render
+    # that changes every time — an auto-synced Application will rewrite
+    # credentials that nothing reads. Nothing asserts that bound yet.
+    allInOne:
+      data:
+        size: 5Gi
+      resources:
+        requests: {cpu: 100m, memory: 256Mi}
+        limits: {cpu: 1, memory: 1Gi}
+  clickhouse:
+    # Off: the subchart's ClickHouse is a pair of operator CRs. The server in
+    # templates/clickhouse.yaml answers on this Service instead, reading the
+    # same Secret — the one store whose credential this chart owns both ends of.
+    deploy: false
+    host: clickhouse
+    auth:
+      existingSecret: clickhouse-auth
+      existingSecretKey: password
+    cluster:
+      # No ON CLUSTER DDL: one server, no Keeper. Langfuse migrates with plain
+      # statements when this is off.
+      enabled: false
 
 # The dependency tier the OpenMetadata server needs. Airflow (ingestion
 # orchestration) is off: the Naira plugin only reads the REST API, Airflow

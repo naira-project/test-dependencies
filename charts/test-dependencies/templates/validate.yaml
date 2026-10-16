@@ -26,6 +26,44 @@ inference backends, not a pair (RFC-009 §1).
 {{- end }}
 
 {{- /*
+Langfuse's bundled stores. An empty password is generated with `randAlphaNum`
+and re-rolls on every render, so an auto-synced Application rewrites the Secret
+forever while the store keeps what it was bootstrapped with. Required, like
+litellm's. ClickHouse is absent: its password lives in clickhouse-auth, which
+both ends read.
+*/}}
+{{- if .Values.tags.langfuse }}
+{{- range $path := list "postgresql.auth.password" "redis.auth.password" "s3.auth.rootPassword" }}
+{{- $v := $.Values.langfuse -}}
+{{- range $k := splitList "." $path }}{{- $v = index ($v | default dict) $k }}{{- end }}
+{{- if not $v }}
+{{- fail (printf "langfuse.%s is required when tags.langfuse is on — an empty value is regenerated on every render" $path) }}
+{{- end }}
+{{- end }}
+
+{{- /*
+The ClickHouse this chart renders and the Langfuse pods reaching it are
+configured from two value trees Helm cannot template across, so user, database
+and Service name are kept equal by hand. Change both or neither — the same rule
+as OpenMetadata's MySQL password below.
+*/}}
+{{- if .Values.clickhouse.deploy }}
+{{- if ne .Values.clickhouse.user .Values.langfuse.clickhouse.auth.username }}
+{{- fail (printf "clickhouse.user (%s) and langfuse.clickhouse.auth.username (%s) address the same server and must match" .Values.clickhouse.user .Values.langfuse.clickhouse.auth.username) }}
+{{- end }}
+{{- if ne .Values.clickhouse.database .Values.langfuse.clickhouse.database }}
+{{- fail (printf "clickhouse.database (%s) and langfuse.clickhouse.database (%s) address the same server and must match" .Values.clickhouse.database .Values.langfuse.clickhouse.database) }}
+{{- end }}
+{{- if .Values.langfuse.clickhouse.deploy }}
+{{- fail "clickhouse.deploy renders this chart's ClickHouse and langfuse.clickhouse.deploy renders the operator's — enable one, not both" }}
+{{- end }}
+{{- if ne .Values.langfuse.clickhouse.host "clickhouse" }}
+{{- fail (printf "langfuse.clickhouse.host is %q but this chart's ClickHouse Service is named clickhouse — set clickhouse.deploy=false to point Langfuse elsewhere" .Values.langfuse.clickhouse.host) }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- /*
 OpenMetadata's MySQL user is created by an init script with a literal password;
 the Secret the server reads must carry the same literal.
 */}}

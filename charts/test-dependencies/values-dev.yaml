@@ -3,13 +3,15 @@
 # On here is what fits on one kind node alongside the Naira chart: Keycloak,
 # LiteLLM + its PostgreSQL, MLflow, llama.cpp (two small models, downloaded on
 # first start) and mcp-mock, plus sample data in MLflow (and in OpenMetadata
-# when its tag is on).
+# when its tag is on). Langfuse and its ClickHouse are configured below but
+# left off — six more workloads do not fit beside the rest on one node.
 
 tags:
   keycloak: true
   litellm: true
   mlflow: true
   mcpMock: true
+  langfuse: false
   openmetadata: false
   monitoring: false
   llamacpp: true
@@ -38,6 +40,18 @@ secrets:
   # `--set tags.openmetadata=true` brings it up without further values.
   openmetadataMysql:
     create: true   # password: chart default, equals the init script's literal
+  # Same arrangement for tags.langfuse, off because six more workloads do not
+  # fit on the node beside the rest. Fixed strings, not generated ones, so two
+  # renders of this file agree — the point of pinning them at all.
+  langfuseApp:
+    create: true
+    salt: langfuse-local-dev-salt
+    # 64 hex chars, as Langfuse requires of ENCRYPTION_KEY.
+    encryptionKey: "0000000000000000000000000000000000000000000000000000000000000000"
+    nextauthSecret: langfuse-local-dev-nextauth
+  clickhouseAuth:
+    create: true
+    password: clickhouse-local-dev
 
 litellm:
   postgresql:
@@ -104,6 +118,35 @@ mlflow:
   # Pinned so renders are deterministic; upstream otherwise generates a new
   # key on every render.
   flaskServerSecretKey: local-dev-flask-key
+
+# Both render only with tags.langfuse: the passwords validate.yaml requires,
+# and volumes a kind node can actually provision.
+clickhouse:
+  storage: 2Gi
+  resources:
+    # 1Gi, not the 512Mi this asked for first: measured at ~1.2Gi idle on kind,
+    # before a single trace is written. An understated request is one the
+    # scheduler believes, and then something else on the node pays for it.
+    requests: {cpu: 200m, memory: 1Gi}
+    limits: {memory: 2Gi}
+
+langfuse:
+  postgresql:
+    auth:
+      password: langfuse-local-postgres
+    storage:
+      requestedSize: 2Gi
+  redis:
+    auth:
+      password: langfuse-local-valkey
+    dataStorage:
+      requestedSize: 1Gi
+  s3:
+    auth:
+      rootPassword: langfuse-local-s3
+    allInOne:
+      data:
+        size: 2Gi
 
 seed:
   mlflow:
