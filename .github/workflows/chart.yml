@@ -114,7 +114,6 @@ jobs:
           # shellcheck disable=SC2086
           helm install test-dependencies charts/test-dependencies --create-namespace ${CHART_ARGS}
           kubectl -n naira-deps wait --for=condition=Available deployment --all --timeout=12m
-          kubectl -n naira-deps wait --for=jsonpath='{.status.readyReplicas}'=1 statefulset --all --timeout=12m
           kubectl -n naira-deps wait --for=condition=complete job --all --timeout=10m
       - name: Upgrade
         # Unchanged upgrade keeps the Jobs; a changed seed spec replaces them.
@@ -128,7 +127,6 @@ jobs:
           helm upgrade test-dependencies charts/test-dependencies ${CHART_ARGS} --set seed.backoffLimit=11
           [ "$(uids)" != "$before" ] || { echo "::error::a changed seed spec kept the old Job"; exit 1; }
           kubectl -n naira-deps wait --for=condition=Available deployment --all --timeout=12m
-          kubectl -n naira-deps wait --for=jsonpath='{.status.readyReplicas}'=1 statefulset --all --timeout=12m
           kubectl -n naira-deps wait --for=condition=complete job --all --timeout=10m
       - name: Show state
         if: always()

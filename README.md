@@ -99,7 +99,6 @@ about 4 CPUs and 8 GiB.
      -n naira-deps --create-namespace \
      -f charts/test-dependencies/values-dev.yaml
    kubectl -n naira-deps wait --for=condition=Available deployment --all --timeout=12m
-   kubectl -n naira-deps wait --for=jsonpath='{.status.readyReplicas}'=1 statefulset --all --timeout=12m
    ```
 
 5. Reach it from the browser. The issuer is `http://localhost:8080`, so
