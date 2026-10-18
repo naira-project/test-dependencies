@@ -26,7 +26,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0 # ct lint diffs against the target branch
           persist-credentials: false
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
@@ -42,9 +41,8 @@ jobs:
       - run: helm lint charts/test-dependencies -f charts/test-dependencies/values-dev.yaml
       - run: charts/test-dependencies/tests/render-test.sh
       - name: ct lint
-        env:
-          TARGET_BRANCH: ${{ github.event.repository.default_branch }}
-        run: ct lint --config ct.yaml --target-branch "$TARGET_BRANCH"
+        # --all: a changed-charts diff is empty on main and on workflow_dispatch
+        run: ct lint --config ct.yaml --all
       - name: Set up kubeconform
         env:
           KUBECONFORM_VERSION: v0.8.0
@@ -110,10 +108,11 @@ jobs:
           kubectl -n idp-system rollout status statefulset/postgres --timeout=5m
       - name: Install
         run: |
-          # kubectl wait, not --wait: LiteLLM's first migration outlasts it.
+          # kubectl, not --wait: LiteLLM's first migration outlasts it.
+          # rollout status, not condition=Available: llama.cpp (maxUnavailable 1) is Available before any pod is Ready.
           # shellcheck disable=SC2086
           helm install test-dependencies charts/test-dependencies --create-namespace ${CHART_ARGS}
-          kubectl -n naira-deps wait --for=condition=Available deployment --all --timeout=12m
+          for d in $(kubectl -n naira-deps get deployment -o name); do kubectl -n naira-deps rollout status "$d" --timeout=12m; done
           kubectl -n naira-deps wait --for=condition=complete job --all --timeout=10m
       - name: Upgrade
         # Unchanged upgrade keeps the Jobs; a changed seed spec replaces them.
@@ -126,7 +125,7 @@ jobs:
           # shellcheck disable=SC2086
           helm upgrade test-dependencies charts/test-dependencies ${CHART_ARGS} --set seed.backoffLimit=11
           [ "$(uids)" != "$before" ] || { echo "::error::a changed seed spec kept the old Job"; exit 1; }
-          kubectl -n naira-deps wait --for=condition=Available deployment --all --timeout=12m
+          for d in $(kubectl -n naira-deps get deployment -o name); do kubectl -n naira-deps rollout status "$d" --timeout=12m; done
           kubectl -n naira-deps wait --for=condition=complete job --all --timeout=10m
       - name: Show state
         if: always()

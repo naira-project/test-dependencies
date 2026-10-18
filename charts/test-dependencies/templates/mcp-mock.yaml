@@ -24,6 +24,8 @@ spec:
       containers:
         - name: mcp-mock
           image: {{ $img | quote }}
+          env:
+            - {name: PORT, value: {{ .Values.mcpMock.port | quote }}}
           ports:
             - {containerPort: {{ .Values.mcpMock.port }}, name: http}
           readinessProbe:

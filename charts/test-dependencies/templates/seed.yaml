@@ -6,7 +6,7 @@ Sample data (files/seed/). Job name = hash of spec and script, not .Release.Revi
 backoffLimit: {{ .Values.seed.backoffLimit }}
 template:
   metadata:
-    labels: {{- include "deps.labels" . | nindent 6 }}
+    labels: {{- include "deps.stableLabels" . | nindent 6 }}
   spec:
     restartPolicy: Never
     containers:
@@ -35,7 +35,7 @@ template:
 backoffLimit: {{ .Values.seed.backoffLimit }}
 template:
   metadata:
-    labels: {{- include "deps.labels" . | nindent 6 }}
+    labels: {{- include "deps.stableLabels" . | nindent 6 }}
   spec:
     restartPolicy: Never
     containers:

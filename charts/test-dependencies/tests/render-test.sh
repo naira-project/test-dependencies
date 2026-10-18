@@ -192,8 +192,8 @@ must_fail "openmetadata must not deploy its own MySQL" "openmetadata-dependencie
   "${OM[@]}" --set openmetadata-dependencies.mysql.enabled=true
 check "dev: openmetadata server references no Secret the release does not render" "" \
   "$(o=$(render "${DEV[@]}" "${OM[@]}"); comm -23 <(echo "$o" | yq ea 'select(.kind == "Deployment" and .metadata.name == "openmetadata") | [.spec.template.spec.initContainers[].env[]?, .spec.template.spec.containers[0].env[]?] | .[] | (.valueFrom.secretKeyRef.name // "")' | grep -v '^$' | sort -u) <(echo "$o" | yq ea 'select(.kind == "Secret") | .metadata.name' | sort -u) | paste -sd, -)"
-check "dev: openmetadata-db Secret matches the naira chart's values-dev.yaml" "openmetadata openmetadata-local-password" \
-  "$(render "${DEV[@]}" "${OM[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "openmetadata-db") | .stringData.username + " " + .stringData.password')"
+check "dev: openmetadata-db Secret matches the naira chart's values-dev.yaml" "openmetadata-local-password" \
+  "$(render "${DEV[@]}" "${OM[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "openmetadata-db") | .stringData.password')"
 
 # litellm sample models (values-dev.yaml)
 LITELLM_CFG='select(.kind == "ConfigMap" and .metadata.name == "litellm-config") | .data["config.yaml"] | from_yaml'

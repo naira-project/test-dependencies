@@ -25,11 +25,10 @@ secrets:
     create: false
     username: litellm
     password: ""
-  # Secret openmetadata-db (keys username, password). Password must equal the
-  # naira chart's database.databases.openmetadata password.
+  # Secret openmetadata-db (key password). Password must equal the naira chart's
+  # database.databases.openmetadata password. Username: openmetadata.openmetadata.config.database.auth.username.
   openmetadataDatabase:
     create: false
-    username: openmetadata
     password: ""
 
 # ── on by default ─────────────────────────────────────────────────────────────
@@ -179,7 +178,7 @@ openmetadata:
         dbScheme: postgresql
         databaseName: openmetadata
         auth:
-          username: openmetadata
+          username: openmetadata   # plain value: the subchart cannot read it from a Secret
           password: {secretRef: openmetadata-db, secretKey: password}
         dbParams: sslmode=disable
         # Main pool only (upstream 10-50); OpenMetadata opens ~17 more outside it.

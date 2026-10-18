@@ -57,21 +57,27 @@ jobs:
         run: |
           APP_VERSION=$(yq '.appVersion' charts/test-dependencies/Chart.yaml)
           echo "app-version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
-          if [ -z "${BASE}" ] || [ "${BASE}" = "0000000000000000000000000000000000000000" ] \
+          if [ -z "${BASE}" ]; then
+            changed=false   # workflow_dispatch: build only if the tag is missing
+          elif [ "${BASE}" = "0000000000000000000000000000000000000000" ] \
             || ! git diff --quiet "${BASE}" HEAD -- images/mcp-mock; then
             changed=true
           else
             changed=false
           fi
-          if docker manifest inspect "${IMAGE}:${APP_VERSION}" >/dev/null 2>&1; then
+          # Only "manifest unknown" means unpublished; any other error fails rather than overwrite.
+          if out=$(docker manifest inspect "${IMAGE}:${APP_VERSION}" 2>&1); then
             if [ "${changed}" = true ]; then
               echo "::error::${IMAGE}:${APP_VERSION} already exists; bump appVersion in charts/test-dependencies/Chart.yaml"
               exit 1
             fi
-            echo "::notice::${IMAGE}:${APP_VERSION} already published and images/mcp-mock is unchanged; nothing to build"
+            echo "::notice::${IMAGE}:${APP_VERSION} already published; nothing to build"
             echo "build=false" >> "$GITHUB_OUTPUT"
-          else
+          elif grep -qiE 'manifest unknown|no such manifest' <<< "${out}"; then
             echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::cannot tell whether ${IMAGE}:${APP_VERSION} exists: ${out}"
+            exit 1
           fi
 
   build:
