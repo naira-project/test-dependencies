@@ -317,7 +317,7 @@ langfuse:
     # created) and generates its three passwords with no values hook to supply
     # them. So `langfuse-s3-sftp-secret` is the one object in a langfuse render
     # that changes every time — an auto-synced Application will rewrite
-    # credentials that nothing reads. Nothing asserts that bound yet.
+    # credentials that nothing reads. tests/render-test.sh holds it to that one.
     allInOne:
       data:
         size: 5Gi

@@ -162,6 +162,85 @@ check "dev: openmetadata server references no Secret the release does not render
 check "dev: mysql-secrets equals the password in the MySQL init script" "yes" \
   "$(o=$(render "${DEV[@]}" "${OM[@]}"); a=$(echo "$o" | yq 'select(.kind == "Secret" and .metadata.name == "mysql-secrets") | .stringData["openmetadata-mysql-password"]'); b=$(echo "$o" | yq ea 'select(.kind == "ConfigMap" and .metadata.name == "mysql-init-scripts") | .data["init_openmetadata_db_scripts.sql"]' | sed -n "s/.*openmetadata_user'@'%' IDENTIFIED BY '\([^']*\)'.*/\1/p"); [ -n "$a" ] && [ "$a" = "$b" ] && echo yes || echo "no ($a vs $b)")"
 
+# langfuse: one upstream chart, the three stores it brings, a ClickHouse this
+# chart renders, and credentials that must not be generated. The tag is off
+# everywhere, so every check turns it on.
+LF=(--set tags.langfuse=true)
+check "langfuse off by default" "" \
+  "$(render | yq ea '[select((.kind == "Deployment" or .kind == "StatefulSet") and (.metadata.name | test("^langfuse|^clickhouse"))) | .metadata.name] | join(",")')"
+must_fail "langfuse: each store password is required" "langfuse.postgresql.auth.password is required" \
+  "${LF[@]}"
+# With the tag on, values-dev.yaml supplies the rest.
+DEVLF=("${DEV[@]}" "${LF[@]}")
+LFWEB='select(.kind == "Deployment" and .metadata.name == "langfuse-web") | .spec.template.spec.containers[0]'
+check "dev+langfuse: web, worker and the three bundled stores" \
+  "langfuse-postgresql,langfuse-s3-all-in-one,langfuse-valkey,langfuse-web,langfuse-worker" \
+  "$(render "${DEVLF[@]}" | yq ea '[select((.kind == "Deployment" or .kind == "StatefulSet") and (.metadata.name | test("^langfuse"))) | .metadata.name] | sort | join(",")')"
+check "dev+langfuse: ClickHouse is this chart's own StatefulSet" "clickhouse" \
+  "$(render "${DEVLF[@]}" | yq ea 'select(.kind == "StatefulSet" and .metadata.name == "clickhouse") | .metadata.name')"
+# The whole point of rendering it here: no operator, so no CRs and no CRDs.
+check "dev+langfuse: nothing needs the ClickHouse operator" "0" \
+  "$(render "${DEVLF[@]}" | yq ea '[select(.apiVersion == "clickhouse.com/v1alpha1")] | length')"
+check "dev+langfuse: ClickHouse serves HTTP and native on one Service" "8123,9000" \
+  "$(render "${DEVLF[@]}" | yq ea '[select(.kind == "Service" and .metadata.name == "clickhouse") | .spec.ports[].port] | sort | join(",")')"
+check "dev+langfuse: the data volume is handed to the image's uid" \
+  "$(yq '.clickhouse.uid' "$CHART/values.yaml")" \
+  "$(render "${DEVLF[@]}" | yq ea 'select(.kind == "StatefulSet" and .metadata.name == "clickhouse") | .spec.template.spec.securityContext.fsGroup')"
+# Server and client read one Secret, so no two copies of the password exist.
+CHSECRET='select(.kind == "StatefulSet" and .metadata.name == "clickhouse") | .spec.template.spec.containers[0].env[] | select(.name == "CLICKHOUSE_PASSWORD") | .valueFrom.secretKeyRef'
+check "dev+langfuse: the server reads the password from clickhouse-auth" "clickhouse-auth/password" \
+  "$(render "${DEVLF[@]}" | yq ea "$CHSECRET | .name + \"/\" + .key")"
+check "dev+langfuse: Langfuse reads the very same Secret" "clickhouse-auth/password" \
+  "$(render "${DEVLF[@]}" | yq "$LFWEB | .env[] | select(.name == \"CLICKHOUSE_PASSWORD\") | .valueFrom.secretKeyRef | .name + \"/\" + .key")"
+check "dev+langfuse: Langfuse connects to the in-chart Service" "http://clickhouse:8123" \
+  "$(render "${DEVLF[@]}" | yq "$LFWEB | .env[] | select(.name == \"CLICKHOUSE_URL\") | .value")"
+check "langfuse: no clickhouse-auth Secret by default" "" \
+  "$(render "${LF[@]}" -f "$CHART/values-dev.yaml" --set secrets.clickhouseAuth.create=false \
+     | yq ea 'select(.kind == "Secret" and .metadata.name == "clickhouse-auth") | .metadata.name')"
+# An adopter with their own ClickHouse drops ours and keeps the rest.
+check "langfuse: clickhouse.deploy=false drops the server, keeps Langfuse" "langfuse-web" \
+  "$(render "${DEVLF[@]}" --set clickhouse.deploy=false --set langfuse.clickhouse.host=ch.example.svc \
+     | yq ea '[select(.kind == "StatefulSet" and .metadata.name == "clickhouse") | .metadata.name, select(.kind == "Deployment" and .metadata.name == "langfuse-web") | .metadata.name] | join(",")')"
+must_fail "clickhouse: user must match what Langfuse authenticates as" "must match" \
+  "${DEVLF[@]}" --set clickhouse.user=analytics
+must_fail "clickhouse: database must match the one Langfuse opens" "must match" \
+  "${DEVLF[@]}" --set clickhouse.database=traces
+# The subchart's ClickHouse hits its own CRD preflight first — the operator is
+# missing, which is why ours exists. Past that, our guard catches the pair.
+must_fail "clickhouse: the operator's ClickHouse still demands the operator" "ClickHouse operator CRDs not found" \
+  "${DEVLF[@]}" --set langfuse.clickhouse.deploy=true
+must_fail "clickhouse: this chart's server and the operator's are exclusive" "enable one, not both" \
+  "${DEVLF[@]}" --set langfuse.clickhouse.deploy=true --set langfuse.clickhouse.crdCheck=false
+must_fail "clickhouse: deploying ours means addressing ours" "set clickhouse.deploy=false" \
+  "${DEVLF[@]}" --set langfuse.clickhouse.host=elsewhere
+# litellm's bundled PostgreSQL is <release>-postgresql; langfuse's would be too.
+check "dev+langfuse: no two objects share a kind and a name" "" \
+  "$(render "${DEVLF[@]}" | yq ea '[select(.kind != null) | .kind + "/" + .metadata.name] | .[]' | sort | uniq -d | paste -sd, -)"
+check "langfuse: SALT comes from the chart's Secret, never generated" "langfuse-app-credentials" \
+  "$(render "${DEVLF[@]}" | yq "$LFWEB | .env[] | select(.name == \"SALT\") | .valueFrom.secretKeyRef.name")"
+check "langfuse: the app credentials Secret is not created by default" "" \
+  "$(render "${LF[@]}" -f "$CHART/values-dev.yaml" --set secrets.langfuseApp.create=false \
+     | yq ea 'select(.kind == "Secret" and .metadata.name == "langfuse-app-credentials") | .metadata.name')"
+check "dev+langfuse: the app credentials Secret outlives the release" "keep" \
+  "$(render "${DEVLF[@]}" | yq ea 'select(.kind == "Secret" and .metadata.name == "langfuse-app-credentials") | .metadata.annotations["helm.sh/resource-policy"]')"
+must_fail "langfuse app Secret create needs a salt" "secrets.langfuseApp.salt is required" \
+  "${DEVLF[@]}" --set secrets.langfuseApp.salt=""
+check "dev+langfuse: web reaches its own PostgreSQL, not litellm's" "langfuse-postgresql" \
+  "$(render "${DEVLF[@]}" | yq "$LFWEB | .env[] | select(.name == \"DATABASE_HOST\") | .value")"
+check "dev+langfuse: Langfuse does not phone home" "false" \
+  "$(render "${DEVLF[@]}" | yq "$LFWEB | .env[] | select(.name == \"TELEMETRY_ENABLED\") | .value")"
+# Everything pinnable is pinned; seaweedfs generates its SFTP credentials with
+# no values hook to stop it (see the s3 block in values.yaml).
+a=$(mktemp); b=$(mktemp); render "${DEVLF[@]}" > "$a"; render "${DEVLF[@]}" > "$b"
+changed=""
+for n in $(yq ea '[select(.kind == "Secret") | .metadata.name] | .[]' "$a"); do
+  q="select(.kind == \"Secret\" and .metadata.name == \"$n\") | (.data // .stringData)"
+  [ "$(yq "$q" "$a" | cksum)" = "$(yq "$q" "$b" | cksum)" ] || changed="$changed$n "
+done
+check "dev+langfuse: renders differ only in seaweedfs's unused SFTP Secret" \
+  "langfuse-s3-sftp-secret " "$changed"
+rm -f "$a" "$b"
+
 # litellm sample models (values-dev.yaml)
 LITELLM_CFG='select(.kind == "ConfigMap" and .metadata.name == "litellm-config") | .data["config.yaml"] | from_yaml'
 check "dev: litellm routes a model to the local llama.cpp" "http://llama-qwen25-05b:8080/v1" \

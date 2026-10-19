@@ -9,6 +9,7 @@ tags:
   litellm: true
   mlflow: true
   mcpMock: true
+  langfuse: false
   openmetadata: false
   monitoring: false
   llamacpp: false
