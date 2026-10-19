@@ -1,36 +1,157 @@
-# SAP Repository Template
-
-Default templates for SAP open source repositories, including LICENSE, .reuse/dep5, Code of Conduct, etc... All repositories on github.com/SAP will be created based on this template.
-
-## To-Do
-
-In case you are the maintainer of a new SAP open source project, these are the steps to do with the template files:
-
-- Check if the default license (Apache 2.0) also applies to your project. A license change should only be required in exceptional cases. If this is the case, please change the [license file](LICENSE).
-- Enter the correct metadata for the REUSE tool. See our [wiki page](https://wiki.one.int.sap/wiki/display/ospodocs/Using+the+Reuse+Tool+of+FSFE+for+Copyright+and+License+Information) for details how to do it. You can find an initial .reuse/dep5 file to build on. Please replace the parts inside the single angle quotation marks < > by the specific information for your repository and be sure to run the REUSE tool to validate that the metadata is correct.
-- Adjust the contribution guidelines (e.g. add coding style guidelines, pull request checklists, different license if needed etc.)
-- Add information about your project to this README (name, description, requirements etc). Especially take care for the <your-project> placeholders - those ones need to be replaced with your project name. See the sections below the horizontal line and [our guidelines on our wiki page](https://wiki.one.int.sap/wiki/pages/viewpage.action?pageId=3564976048#GuidelinesforGitHubHealthfiles(Readme,Contributing,CodeofConduct)-Readme.md) what is required and recommended.
-- Adjust the AGENTS.md file for the corresponding repository.
-- Remove all content in this README above and including the horizontal line ;)
-
-***
-
-# Our new open source project
+# test-dependencies
 
 ## About this project
 
-*Insert a short description of your project here...*
+The third-party tier Naira talks to but does not ship (RFC-009 §1): Keycloak,
+LiteLLM, MLflow, OpenMetadata, llama.cpp, vLLM,
+kube-prometheus-stack and `mcp-mock`, packaged as one Helm chart. It is
+versioned independently of Naira, because these components move on upstream
+release cycles, not on Naira's.
+
+The [naira chart](https://github.com/naira-project/naira/tree/main/deploy/charts/naira)
+installs Naira itself and only needs these components' addresses. Its
+defaults expect this chart in namespace `naira-deps`.
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `charts/test-dependencies/` | The chart. `values.yaml` holds operator defaults (Secrets supplied externally), `values-dev.yaml` a single-node kind or colima setup, `ci/` lint and render fixtures, `tests/render-test.sh` the render assertions. |
+| `images/mcp-mock/` | Source of `mcp-mock`, a test double for the catalog's `mcp-servers` plugin. Dev only. |
+| `.github/workflows/` | `chart.yml` (lint, render tests, kubeconform, kind install), `chart-publish.yml` (chart to ghcr on tag `v<version>`), `mcp-mock-image.yml` (image to ghcr). |
+
+## Components
+
+One Helm tag per component. `values.yaml` turns on what an operator who runs
+none of this needs; `values-dev.yaml` adds what a local Naira needs.
+
+| Tag | Installs | `values.yaml` | `values-dev.yaml` |
+|---|---|---|---|
+| `keycloak` | Keycloak with realm `naira` (`files/naira-realm.json`) | on | on |
+| `litellm` | LiteLLM; its database is on Naira's PostgreSQL | on | on |
+| `mlflow` | MLflow, SQLite on PVC `mlflow-data` | on | on |
+| `mcpMock` | `mcp-mock` | off | on |
+| `llamacpp` | llama.cpp, one Deployment per model | off | on |
+| `vllm` | vLLM (exclusive with `llamacpp`) | off | off |
+| `openmetadata` | OpenMetadata with OpenSearch; its database is on Naira's PostgreSQL | off | off |
+| `monitoring` | kube-prometheus-stack and the ServiceMonitors | off | off |
 
 ## Requirements and Setup
 
-*Insert a short description what is required to get your project running...*
+### Local cluster with Naira
+
+Needs `helm` 4, `kubectl`, and a single-node kind or colima cluster with
+about 4 CPUs and 8 GiB.
+
+1. Fetch the chart's dependencies. Helm 4 does not fetch from unregistered
+   HTTP repositories:
+
+   ```sh
+   helm repo add community-charts https://community-charts.github.io/helm-charts
+   helm repo add open-metadata https://helm.open-metadata.org
+   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+   helm dependency build charts/test-dependencies
+   ```
+
+2. Load the `mcp-mock` image into the cluster, until ghcr serves it publicly:
+
+   ```sh
+   TAG=$(sed -n 's/^appVersion: "\(.*\)"/\1/p' charts/test-dependencies/Chart.yaml)
+   IMG=ghcr.io/naira-project/test-dependencies/mcp-mock:$TAG
+   # colima with the containerd runtime
+   colima nerdctl -- --namespace k8s.io build -t "$IMG" images/mcp-mock
+   # kind
+   docker build -t "$IMG" images/mcp-mock && kind load docker-image "$IMG"
+   ```
+
+3. Install the naira chart into `idp-system`, the only namespace its UI works
+   in for now. It runs the PostgreSQL server that LiteLLM uses, and its
+   `db-init` Job creates the `litellm` and `openmetadata` databases. Its defaults already address
+   this chart in `naira-deps`; only the development Secrets are set. The
+   OpenMetadata plugin is off because `values-dev.yaml` leaves OpenMetadata
+   off. Needs a naira release that ships PostgreSQL.
+
+   ```sh
+   helm upgrade --install naira oci://ghcr.io/naira-project/charts/naira \
+     --version <release> -n idp-system --create-namespace \
+     --set catalog.secret.create=true \
+     --set catalog.secret.data.LITELLM_API_KEY=sk-local-litellm \
+     --set catalog.secret.data.OPENMETADATA_ADMIN_PASSWORD=admin \
+     --set catalog.plugins.openmetadata.enabled=false \
+     --set portal.oidc.secret.create=true \
+     --set portal.oidc.secret.value=naira-local-dev-secret \
+     --set database.admin.secret.create=true \
+     --set database.admin.secret.password=postgres-local-admin-password \
+     --set database.databases.catalog.secret.create=true \
+     --set database.databases.catalog.secret.password=catalog-local-password \
+     --set database.databases.litellm.enabled=true \
+     --set database.databases.litellm.secret.create=true \
+     --set database.databases.litellm.secret.password=litellm-local-password \
+     --set database.databases.openmetadata.enabled=true \
+     --set database.databases.openmetadata.secret.create=true \
+     --set database.databases.openmetadata.secret.password=openmetadata-local-password \
+     --wait --timeout 10m
+   ```
+
+4. Install this chart into `naira-deps`, then wait for it. LiteLLM migrates
+   its database on first start, which can take several minutes, so the wait
+   is `kubectl wait` with a long timeout rather than Helm's `--wait`.
+
+   ```sh
+   helm upgrade --install test-dependencies charts/test-dependencies \
+     -n naira-deps --create-namespace \
+     -f charts/test-dependencies/values-dev.yaml
+   kubectl -n naira-deps wait --for=condition=Available deployment --all --timeout=12m
+   ```
+
+5. Reach it from the browser. The issuer is `http://localhost:8080`, so
+   Keycloak must be forwarded on that port:
+
+   ```sh
+   kubectl -n naira-deps port-forward svc/keycloak 8080:8080 &
+   kubectl -n idp-system port-forward svc/portal 3000:3000 &
+   kubectl -n idp-system port-forward svc/ui 3001:80 &
+   ```
+
+   Portal at <http://localhost:3000>, user `testuser`, password `testpass`.
+
+Every credential in `values-dev.yaml`, `ci/`, `files/naira-realm.json` and
+the commands above is a local development placeholder.
+
+### Other clusters
+
+Keep `values.yaml`'s default of operator-supplied Secrets (the
+`secrets.*.create: false` keys document each name and key) and set
+`keycloak.hostname` to the address browsers use. Replace the development
+realm with `keycloak.realmImport.existingConfigMap`. Released charts:
+
+```sh
+helm install test-dependencies oci://ghcr.io/naira-project/charts/test-dependencies \
+  --version <version> -n naira-deps --create-namespace -f my-values.yaml
+```
+
+### Tests
+
+```sh
+charts/test-dependencies/tests/render-test.sh   # after helm dependency build; needs yq v4
+```
+
+### Publishing
+
+- Chart: push tag `v<version>` with `<version>` equal to `version` in
+  `charts/test-dependencies/Chart.yaml`.
+- `mcp-mock`: built for amd64 and arm64 on pushes to `main` that change
+  `images/mcp-mock/` or `Chart.yaml`, and published under the chart's
+  `appVersion` when that tag does not exist yet. A published `appVersion` is
+  never overwritten: an image change needs an `appVersion` bump. The ghcr package must be made public once, by an
+  organization owner, before clusters can pull it without credentials.
 
 ## Support, Feedback, Contributing
 
-This project is open to feature requests/suggestions, bug reports etc. via [GitHub issues](https://github.com/naira-project/<your-project>/issues). Contribution and feedback are encouraged and always welcome. For more information about how to contribute, the project structure, as well as additional contribution information, see our [Contribution Guidelines](CONTRIBUTING.md).
+This project is open to feature requests/suggestions, bug reports etc. via [GitHub issues](https://github.com/naira-project/test-dependencies/issues). Contribution and feedback are encouraged and always welcome. For more information about how to contribute, the project structure, as well as additional contribution information, see our [Contribution Guidelines](CONTRIBUTING.md).
 
 ## Security / Disclosure
-If you find any bug that may be a security problem, please follow our instructions at [in our security policy](https://github.com/naira-project/<your-project>/security/policy) on how to report it. Please do not create GitHub issues for security-related doubts or problems.
+If you find any bug that may be a security problem, please follow our instructions at [in our security policy](https://github.com/naira-project/test-dependencies/security/policy) on how to report it. Please do not create GitHub issues for security-related doubts or problems.
 
 ## Code of Conduct
 

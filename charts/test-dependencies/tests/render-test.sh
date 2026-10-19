@@ -5,8 +5,7 @@ set -euo pipefail
 CHART="$(cd "$(dirname "$0")/.." && pwd)"
 fail=0
 
-# Bare defaults do not render: secrets.litellmPostgres.password is required.
-render() { helm template t "$CHART" --namespace deps --set litellm.postgresql.auth.password=test-pg --set litellm.postgresql.auth.postgres-password=test-pg "$@"; }
+render() { helm template t "$CHART" --namespace deps "$@"; }
 
 check() {
   if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: expected '$2', got '$3'"; fail=1; fi
@@ -31,6 +30,8 @@ check "no generated masterkey Secret by default" "" \
   "$(render | yq 'select(.kind == "Secret" and .metadata.name == "litellm-masterkey") | .metadata.name')"
 check "litellm reads masterkey from litellm-masterkey" "litellm-masterkey" \
   "$(render | yq "$LITELLM | .env[] | select(.name == \"PROXY_MASTER_KEY\") | .valueFrom.secretKeyRef.name")"
+check "litellm serves /metrics by default" "prometheus" \
+  "$(render | yq 'select(.kind == "ConfigMap" and .metadata.name == "litellm-config") | .data["config.yaml"]' | yq '.litellm_settings.callbacks[0]')"
 check "litellm loads provider keys" "litellm-provider-keys" \
   "$(render | yq "$LITELLM | .envFrom[].secretRef.name")"
 check "masterkey Secret when create=true" "sk-test" \
@@ -42,10 +43,20 @@ check "provider keys Secret when create=true" "k1" \
 must_fail "masterkey create needs a value" "secrets.litellmMasterkey.value is required" \
   --set secrets.litellmMasterkey.create=true
 
-# bitnami PostgreSQL must not render its own (random) Secret
-check "postgres reuses litellm-dbcredentials" "" \
-  "$(render | yq 'select(.kind == "Secret" and (.metadata.name | test("postgresql"))) | .metadata.name')"
-# Only mlflow's flask key may differ between two default renders (see Global Constraints)
+# LiteLLM's database is on Naira's PostgreSQL
+check "no PostgreSQL objects" "0" \
+  "$(render | yq ea '[select(.metadata.name | test("postgres"))] | length')"
+check "litellm connects to Naira's PostgreSQL" "postgres.idp-system.svc.cluster.local:5432 litellm" \
+  "$(render | yq "$LITELLM | (.env[] | select(.name == \"DATABASE_HOST\") | .value) + \" \" + (.env[] | select(.name == \"DATABASE_NAME\") | .value)")"
+check "litellm reads its database credentials from litellm-db" "litellm-db litellm-db" \
+  "$(render | yq ea "$LITELLM | [.env[] | select(.name == \"DATABASE_USERNAME\" or .name == \"DATABASE_PASSWORD\") | .valueFrom.secretKeyRef.name] | join(\" \")")"
+check "no generated litellm-db Secret by default" "" \
+  "$(render | yq 'select(.kind == "Secret" and .metadata.name == "litellm-db") | .metadata.name')"
+must_fail "litellm-db create needs a password" "secrets.litellmDatabase.password is required" \
+  --set secrets.litellmDatabase.create=true
+must_fail "litellm must not deploy its own PostgreSQL" "litellm.db.deployStandalone must be false" \
+  --set litellm.db.deployStandalone=true
+# Only mlflow's flask key may differ between two default renders
 a=$(mktemp); b=$(mktemp); render > "$a"; render > "$b"
 changed=""
 for n in $(yq ea '[select(.kind == "Secret") | .metadata.name] | .[]' "$a"); do
@@ -74,7 +85,7 @@ check "dev: masterkey Secret created" "sk-local-litellm" \
 check "dev: provider keys Secret created" "litellm-provider-keys" \
   "$(render "${DEV[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "litellm-provider-keys") | .metadata.name')"
 n=$(render "${DEV[@]}" | grep -c 'naira-poc-registry' || true)   # grep exits 1 on no match
-check "dev: no image points at the PoC registry" "0" "${n:-0}"
+check "dev: no image points at the ci/poc-values.yaml registry" "0" "${n:-0}"
 a=$(mktemp); b=$(mktemp); render "${DEV[@]}" > "$a"; render "${DEV[@]}" > "$b"
 check "dev: two renders are identical" "yes" "$(cmp -s "$a" "$b" && echo yes || echo no)"
 rm -f "$a" "$b"
@@ -86,14 +97,8 @@ check "dev+monitoring: two renders are identical" "yes" "$(cmp -s "$a" "$b" && e
 rm -f "$a" "$b"
 check "ServiceMonitor for litellm is absent when litellm is off" "" \
   "$(render --set tags.monitoring=true --set tags.litellm=false | yq ea 'select(.kind == "ServiceMonitor" and .metadata.name == "litellm") | .metadata.name')"
-check "dev: postgres image is pinned" "registry-1.docker.io/bitnamilegacy/postgresql:17.6.0-debian-12-r4" \
-  "$(render "${DEV[@]}" | yq ea 'select(.kind == "StatefulSet" and (.metadata.name | test("postgresql"))) | .spec.template.spec.containers[0].image')"
-check "dev: postgres password is the configured one, not the upstream sample" "litellm-local-postgres" \
-  "$(helm template t "$CHART" --namespace deps "${DEV[@]}" | yq ea 'select(.kind == "Secret" and .metadata.name == "litellm-dbcredentials") | .data.password' | base64 -d)"
-must_fail "postgres password required" "litellm.postgresql.auth.password is required" \
-  --set litellm.postgresql.auth.password=""
-must_fail "postgres password must not be the upstream sample" "must not be the litellm-helm sample" \
-  --set litellm.postgresql.auth.postgres-password=NoTaGrEaTpAsSwOrD
+check "dev: litellm-db Secret matches the naira chart's values-dev.yaml" "litellm litellm-local-password" \
+  "$(render "${DEV[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "litellm-db") | .stringData.username + " " + .stringData.password')"
 
 # keycloak admin Secret
 must_fail "keycloak admin create needs a username" "keycloak.admin.username is required" \
@@ -102,6 +107,16 @@ must_fail "keycloak admin create needs a password" "keycloak.admin.password is r
   --set keycloak.admin.create=true --set keycloak.admin.username=x
 must_fail "keycloak admin: existing and create" "keycloak.admin: set existingSecret or create, not both" \
   --set keycloak.admin.create=true --set keycloak.admin.existingSecret=x --set keycloak.admin.username=x --set keycloak.admin.password=x
+
+# keycloak realm import: bundled by default, replaceable per environment
+KCVOL='select(.kind == "Deployment" and .metadata.name == "keycloak") | .spec.template.spec.volumes[] | select(.name == "realm-import") | .configMap.name'
+check "keycloak imports the bundled realm by default" "keycloak-realm-import" "$(render | yq "$KCVOL")"
+check "keycloak imports an existing realm ConfigMap" "my-realm" \
+  "$(render --set keycloak.realmImport.existingConfigMap=my-realm | yq "$KCVOL")"
+check "no bundled realm ConfigMap with existingConfigMap" "" \
+  "$(render --set keycloak.realmImport.existingConfigMap=my-realm \
+     | yq 'select(.kind == "ConfigMap" and .metadata.name == "keycloak-realm-import") | .metadata.name')"
+
 check "mcp-mock off by default" "" \
   "$(render | yq 'select(.kind == "Deployment" and .metadata.name == "mcp-mock") | .metadata.name')"
 check "ServiceMonitor carries the release label" "t" \
@@ -115,14 +130,18 @@ check "llamacpp: server exposes metrics" "true" \
   "$(render --set tags.llamacpp=true | yq "$LLAMA | .containers[0].args | contains([\"--metrics\"])")"
 check "llamacpp: fsGroup so the unprivileged downloader can write the PVC" "$(yq '.llamacpp.fsGroup' "$CHART/values.yaml")" \
   "$(render --set tags.llamacpp=true | yq "$LLAMA | .securityContext.fsGroup")"
-check "llamacpp: one shared model cache PVC" "llamacpp-model-cache" \
-  "$(render --set tags.llamacpp=true | yq ea 'select(.kind == "PersistentVolumeClaim") | .metadata.name')"
+check "llamacpp: one model cache PVC per model" "llama-dummy-model-model-cache,llama-qwen25-05b-model-cache" \
+  "$(render --set tags.llamacpp=true | yq ea '[select(.kind == "PersistentVolumeClaim" and (.metadata.name | test("^llama"))) | .metadata.name] | sort | join(",")')"
+check "llamacpp: each Deployment mounts its own PVC" "llama-dummy-model-model-cache,llama-qwen25-05b-model-cache" \
+  "$(render --set tags.llamacpp=true | yq ea '[select(.kind == "Deployment" and (.metadata.name | test("^llama"))) | .spec.template.spec.volumes[0].persistentVolumeClaim.claimName] | sort | join(",")')"
+check "llamacpp: maxSurge 0, so a ReadWriteOnce volume is released before the new pod starts" "RollingUpdate/0/1" \
+  "$(render --set tags.llamacpp=true | yq ea '[select(.kind == "Deployment" and (.metadata.name | test("^llama"))) | .spec.strategy | .type + "/" + (.rollingUpdate.maxSurge | tostring) + "/" + (.rollingUpdate.maxUnavailable | tostring)] | unique | join(",")')"
 check "llamacpp: Services are labelled as inference" "llama-dummy-model,llama-qwen25-05b" \
   "$(render --set tags.llamacpp=true | yq ea '[select(.kind == "Service" and .metadata.labels["app.kubernetes.io/component"] == "inference") | .metadata.name] | sort | join(",")')"
 check "llamacpp: models come from values" "llama-only" \
   "$(render --set tags.llamacpp=true --set-json 'llamacpp.models=[{"name":"llama-only","modelFile":"m.gguf","downloadUrl":"https://example.invalid/m.gguf","resources":{}}]' | yq ea 'select(.kind == "Deployment" and .metadata.name == "llama-*") | .metadata.name')"
 check "llamacpp: off by default" "" \
-  "$(render | yq ea 'select(.kind == "PersistentVolumeClaim" and .metadata.name == "llamacpp-model-cache") | .metadata.name')"
+  "$(render | yq ea 'select(.kind == "PersistentVolumeClaim" and (.metadata.name | test("model-cache$"))) | .metadata.name')"
 VLLM='select(.kind == "Deployment" and .metadata.name == "vllm") | .spec.template.spec.containers[0]'
 check "vllm: container port is vLLM's own 8000" "8000" \
   "$(render --set tags.vllm=true | yq "$VLLM | .ports[0].containerPort")"
@@ -130,6 +149,16 @@ check "vllm: Service targets the named port" "8000" \
   "$(render --set tags.vllm=true | yq 'select(.kind == "Service" and .metadata.name == "vllm") | .spec.ports[0].port')"
 check "vllm: serves the configured model name" "opt-125m" \
   "$(render --set tags.vllm=true | yq "$VLLM | .args[2]")"
+check "vllm: --enforce-eager skips the torch.compile warm-up" "true" \
+  "$(render --set tags.vllm=true | yq "$VLLM | .args | contains([\"--enforce-eager\"])")"
+check "vllm: enforceEager is a switch" "false" \
+  "$(render --set tags.vllm=true --set vllm.enforceEager=false | yq "$VLLM | .args | contains([\"--enforce-eager\"])")"
+check "vllm: maxSurge 0, so a rollout never runs two vLLM pods" "0" \
+  "$(render --set tags.vllm=true | yq 'select(.kind == "Deployment" and .metadata.name == "vllm") | .spec.strategy.rollingUpdate.maxSurge')"
+check "vllm: startup probe gates liveness for a 10-minute start" "600" \
+  "$(render --set tags.vllm=true | yq "$VLLM | .startupProbe.periodSeconds * .startupProbe.failureThreshold")"
+check "vllm: Hugging Face cache survives container restarts" "/root/.cache/huggingface" \
+  "$(render --set tags.vllm=true | yq "$VLLM | .volumeMounts[] | select(.name == \"hf-cache\") | .mountPath")"
 check "vllm: mounts the chat template" "vllm-chat-template" \
   "$(render --set tags.vllm=true | yq 'select(.kind == "ConfigMap" and .metadata.name == "vllm-chat-template") | .metadata.name')"
 check "inference ServiceMonitor follows monitoring + a backend" "inference" \
@@ -141,34 +170,72 @@ check "no inference ServiceMonitor without a backend" "" \
 check "no inference ServiceMonitor without monitoring" "" \
   "$(render --set tags.llamacpp=true | yq ea 'select(.kind == "ServiceMonitor") | .metadata.name')"
 
-# openmetadata: server + its dependencies (MySQL, OpenSearch) ride one tag; Airflow stays off
+# openmetadata: server and dependencies on one tag, no Airflow
 OM=(--set tags.openmetadata=true)
 check "openmetadata off by default" "" \
   "$(render | yq 'select(.kind == "Deployment" and .metadata.name == "openmetadata") | .metadata.name')"
-check "openmetadata on: server, mysql, opensearch rendered" "mysql,openmetadata,opensearch" \
-  "$(render "${OM[@]}" | yq ea '[select((.kind == "Deployment" or .kind == "StatefulSet") and (.metadata.name == "openmetadata" or .metadata.name == "mysql" or .metadata.name == "opensearch")) | .metadata.name] | sort | join(",")')"
+check "openmetadata on: server and opensearch rendered, no mysql" "openmetadata,opensearch" \
+  "$(render "${OM[@]}" | yq ea '[select((.kind == "Deployment" or .kind == "StatefulSet") and (.metadata.name == "openmetadata" or (.metadata.name | test("mysql")) or .metadata.name == "opensearch")) | .metadata.name] | sort | join(",")')"
+check "openmetadata on: no bitnami image" "0" \
+  "$(render "${OM[@]}" | yq ea '[.. | select(has("image")) | .image | select(test("bitnami"))] | length')"
+check "openmetadata connects to its database on Naira's PostgreSQL" "postgres.idp-system.svc.cluster.local 5432 openmetadata postgresql" \
+  "$(render "${OM[@]}" | yq 'select(.kind == "Secret" and .data.DB_HOST != null) | .data | (.DB_HOST | @base64d) + " " + (.DB_PORT | @base64d) + " " + (.OM_DATABASE | @base64d) + " " + (.DB_SCHEME | @base64d)')"
 check "openmetadata on: no airflow" "0" \
   "$(render "${OM[@]}" | yq ea '[select(.kind == "Deployment" or .kind == "StatefulSet") | .metadata.name | select(test("airflow"))] | length')"
 check "openmetadata on: pipeline service client disabled" "false" \
   "$(render "${OM[@]}" | yq ea 'select(.kind == "Secret" and .data.PIPELINE_SERVICE_CLIENT_ENABLED != null) | .data.PIPELINE_SERVICE_CLIENT_ENABLED | @base64d' | tr -d '"')"
-check "openmetadata on: no mysql-secrets by default" "" \
-  "$(render "${OM[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "mysql-secrets") | .metadata.name')"
-must_fail "openmetadata: Secret password must match the init script" "does not match the password in openmetadata-dependencies.mysql.initdbScripts" \
-  "${OM[@]}" --set secrets.openmetadataMysql.create=true --set secrets.openmetadataMysql.password=pw1
-must_fail "openmetadata mysql Secret create rejects an empty password" "secrets.openmetadataMysql.password" \
-  "${OM[@]}" --set secrets.openmetadataMysql.create=true --set secrets.openmetadataMysql.password=""
+check "openmetadata on: no openmetadata-db Secret by default" "" \
+  "$(render "${OM[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "openmetadata-db") | .metadata.name')"
+must_fail "openmetadata-db create needs a password" "secrets.openmetadataDatabase.password is required" \
+  "${OM[@]}" --set secrets.openmetadataDatabase.create=true
+must_fail "openmetadata must not deploy its own MySQL" "openmetadata-dependencies.mysql.enabled must be false" \
+  "${OM[@]}" --set openmetadata-dependencies.mysql.enabled=true
 check "dev: openmetadata server references no Secret the release does not render" "" \
   "$(o=$(render "${DEV[@]}" "${OM[@]}"); comm -23 <(echo "$o" | yq ea 'select(.kind == "Deployment" and .metadata.name == "openmetadata") | [.spec.template.spec.initContainers[].env[]?, .spec.template.spec.containers[0].env[]?] | .[] | (.valueFrom.secretKeyRef.name // "")' | grep -v '^$' | sort -u) <(echo "$o" | yq ea 'select(.kind == "Secret") | .metadata.name' | sort -u) | paste -sd, -)"
-check "dev: mysql-secrets equals the password in the MySQL init script" "yes" \
-  "$(o=$(render "${DEV[@]}" "${OM[@]}"); a=$(echo "$o" | yq 'select(.kind == "Secret" and .metadata.name == "mysql-secrets") | .stringData["openmetadata-mysql-password"]'); b=$(echo "$o" | yq ea 'select(.kind == "ConfigMap" and .metadata.name == "mysql-init-scripts") | .data["init_openmetadata_db_scripts.sql"]' | sed -n "s/.*openmetadata_user'@'%' IDENTIFIED BY '\([^']*\)'.*/\1/p"); [ -n "$a" ] && [ "$a" = "$b" ] && echo yes || echo "no ($a vs $b)")"
+check "dev: openmetadata-db Secret matches the naira chart's values-dev.yaml" "openmetadata-local-password" \
+  "$(render "${DEV[@]}" "${OM[@]}" | yq 'select(.kind == "Secret" and .metadata.name == "openmetadata-db") | .stringData.password')"
 
-# The ArgoCD PoC Application must keep rendering against this chart's guards
-# (its valuesObject drifted from the chart once already).
-POC="$CHART/../../argocd/environments/poc/test-dependencies.yaml"
-poc_values=$(mktemp); yq '.spec.source.helm.valuesObject' "$POC" > "$poc_values"
-poc_vf=$(yq '.spec.source.helm.valueFiles[0] // ""' "$POC")
-check "argocd PoC Application values render" "ok" \
-  "$(helm template poc "$CHART" --namespace naira-deps ${poc_vf:+-f "$CHART/$poc_vf"} -f "$poc_values" >/dev/null 2>&1 && echo ok || echo "FAILED to render")"
-rm -f "$poc_values"
+# litellm sample models (values-dev.yaml)
+LITELLM_CFG='select(.kind == "ConfigMap" and .metadata.name == "litellm-config") | .data["config.yaml"] | from_yaml'
+check "dev: litellm routes a model to the local llama.cpp" "http://llama-qwen25-05b:8080/v1" \
+  "$(render "${DEV[@]}" | yq "$LITELLM_CFG | .model_list[] | select(.model_name == \"idp-llama-qwen25-05b\") | .litellm_params.api_base")"
+check "dev: litellm knows the mcp-mock server" "http://mcp-mock:8080/mcp" \
+  "$(render "${DEV[@]}" | yq "$LITELLM_CFG | .mcp_servers.mock_kb.url")"
+check "dev: every provider key the model list reads is in the Secret" "" \
+  "$(o=$(render "${DEV[@]}"); comm -23 <(echo "$o" | yq "$LITELLM_CFG | .model_list[].litellm_params.api_key | select(. != null) | sub(\"os.environ/\"; \"\")" | sort -u) <(echo "$o" | yq 'select(.kind == "Secret" and .metadata.name == "litellm-provider-keys") | .stringData | keys | .[]' | sort -u) | paste -sd, -)"
+
+# sample data Jobs
+check "seed: no Jobs by default" "" \
+  "$(render | yq ea 'select(.kind == "Job" and (.metadata.name | test("^seed-"))) | .metadata.name')"
+# Named by a hash of spec and script, not .Release.Revision (always 1 under Argo)
+SEEDS='[select(.kind == "Job" and (.metadata.name | test("^seed-"))) | .metadata.name] | sort | join(",")'
+seeds() { render "$@" | yq ea "$SEEDS"; }
+check "dev: mlflow seed Job, named by hash" "yes" \
+  "$(seeds "${DEV[@]}" | grep -qE '^seed-mlflow-[0-9a-f]{8}$' && echo yes || echo no)"
+check "seed: name is stable across renders" "$(seeds "${DEV[@]}")" "$(seeds "${DEV[@]}")"
+check "seed: new name when the spec changes" "no" \
+  "$([ "$(seeds "${DEV[@]}")" = "$(seeds "${DEV[@]}" --set seed.mlflow.image=x)" ] && echo yes || echo no)"
+check "dev: mlflow seed reaches the mlflow Service" "http://mlflow:5000" \
+  "$(render "${DEV[@]}" | yq 'select(.kind == "Job" and (.metadata.name | test("^seed-mlflow-"))) | .spec.template.spec.containers[0].env[] | select(.name == "MLFLOW_TRACKING_URI") | .value')"
+check "mlflow: db-upgrade image is the server's" "$(render | yq 'select(.kind == "Deployment" and .metadata.name == "mlflow") | .spec.template.spec.containers[0].image')" \
+  "$(render | yq 'select(.kind == "Deployment" and .metadata.name == "mlflow") | .spec.template.spec.initContainers[] | select(.name == "db-upgrade") | .image')"
+check "seed: mlflow image is the subchart's" "$(render | yq 'select(.kind == "Deployment" and .metadata.name == "mlflow") | .spec.template.spec.containers[0].image')" \
+  "$(yq '.seed.mlflow.image' "$CHART/values.yaml")"
+check "seed: mlflow script is mounted" "yes" \
+  "$(render "${DEV[@]}" | yq 'select(.kind == "ConfigMap" and .metadata.name == "seed-mlflow") | .data["seed.py"]' | grep -q 'registered_model_name' && echo yes || echo no)"
+check "dev+openmetadata: openmetadata seed Job" "yes" \
+  "$(seeds "${DEV[@]}" "${OM[@]}" | grep -qE '^seed-mlflow-[0-9a-f]{8},seed-openmetadata-[0-9a-f]{8}$' && echo yes || echo no)"
+check "seed: none for a component that is off" "" \
+  "$(render "${DEV[@]}" --set tags.mlflow=false | yq ea 'select(.kind == "Job" and (.metadata.name | test("^seed-"))) | .metadata.name')"
+
+# securityContext on the pods this chart defines (llama.cpp and vLLM excepted)
+check "own pods run as non-root" "keycloak:true,mcp-mock:true,seed:true,seed:true" \
+  "$(render "${DEV[@]}" "${OM[@]}" | yq ea '[select((.kind == "Deployment" or .kind == "Job") and (.metadata.name | test("^(keycloak|mcp-mock|seed-)"))) | .spec.template.spec.containers[] | .name + ":" + (.securityContext.runAsNonRoot | tostring)] | sort | join(",")')"
+
+# Every ci/ fixture must still render
+for f in "$CHART"/ci/*-values.yaml; do
+  check "ci/$(basename "$f") renders" "ok" \
+    "$(helm template ci "$CHART" --namespace naira-deps -f "$f" >/dev/null 2>&1 && echo ok || echo "FAILED to render")"
+done
 
 exit $fail

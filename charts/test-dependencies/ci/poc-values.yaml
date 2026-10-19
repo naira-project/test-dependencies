@@ -1,0 +1,33 @@
+# Lint/render fixture: the RFC-009 PoC Application's values. Placeholder credentials.
+tags:
+  keycloak: true
+  litellm: true
+  mlflow: true
+  mcpMock: true
+  openmetadata: false
+  monitoring: false
+  llamacpp: false
+  vllm: false
+keycloak:
+  admin:
+    create: true
+    username: admin
+    password: admin
+mcpMock:
+  image:
+    registry: naira-poc-registry:5000
+    repository: naira-mcp-mock
+    tag: 0.1.0-poc
+secrets:
+  litellmMasterkey:
+    create: true
+    value: sk-local-litellm  # equals the catalog's LITELLM_API_KEY in README step 4
+  litellmProviderKeys:
+    create: true
+    data:
+      MISTRAL_API_KEY: change-me
+  litellmDatabase:
+    create: true
+    password: litellm-poc-password
+mlflow:
+  flaskServerSecretKey: poc-flask-key

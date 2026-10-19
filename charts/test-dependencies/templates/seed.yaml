@@ -1,0 +1,110 @@
+{{- /*
+Sample data (files/seed/). Job name = hash of spec and script, not .Release.Revision
+(always 1 under Argo). Delete the Job to re-seed.
+*/}}
+{{- define "deps.seed.mlflow.spec" -}}
+backoffLimit: {{ .Values.seed.backoffLimit }}
+template:
+  metadata:
+    labels: {{- include "deps.stableLabels" . | nindent 6 }}
+  spec:
+    restartPolicy: Never
+    containers:
+      - name: seed
+        image: {{ .Values.seed.mlflow.image | quote }}
+        command: [python, /seed/seed.py]
+        # Artifacts land in this container's /mlflow/mlruns; only the registry entry matters.
+        workingDir: /tmp
+        env:
+          - {name: MLFLOW_TRACKING_URI, value: "http://mlflow:{{ .Values.mlflow.service.port }}"}
+          - {name: HOME, value: /tmp}
+        resources: {{- toYaml .Values.seed.resources | nindent 10 }}
+        securityContext:
+          {{- include "deps.securityContext" . | nindent 10 }}
+          # uid of the image's mlflow user; root fs writable for /mlflow/mlruns
+          runAsUser: 1001
+          runAsGroup: 1001
+        volumeMounts:
+          - {name: seed, mountPath: /seed}
+          - {name: tmp, mountPath: /tmp}
+    volumes:
+      - {name: seed, configMap: {name: seed-mlflow}}
+      - {name: tmp, emptyDir: {}}
+{{- end }}
+{{- define "deps.seed.openmetadata.spec" -}}
+backoffLimit: {{ .Values.seed.backoffLimit }}
+template:
+  metadata:
+    labels: {{- include "deps.stableLabels" . | nindent 6 }}
+  spec:
+    restartPolicy: Never
+    containers:
+      - name: seed
+        image: {{ .Values.seed.openmetadata.image | quote }}
+        command:
+          - sh
+          - -c
+          - pip install --no-cache-dir --quiet --target /tmp/deps {{ .Values.seed.openmetadata.requests | quote }} && python /seed/seed.py
+        env:
+          - {name: OPENMETADATA_HOST_PORT, value: "http://openmetadata:8585"}
+          # non-root: pip installs into /tmp
+          - {name: PYTHONPATH, value: /tmp/deps}
+          - {name: HOME, value: /tmp}
+        resources: {{- toYaml .Values.seed.resources | nindent 10 }}
+        securityContext:
+          {{- include "deps.securityContext" . | nindent 10 }}
+          runAsUser: 65534
+          runAsGroup: 65534
+          readOnlyRootFilesystem: true
+        volumeMounts:
+          - {name: seed, mountPath: /seed}
+          - {name: tmp, mountPath: /tmp}
+    volumes:
+      - {name: seed, configMap: {name: seed-openmetadata}}
+      - {name: tmp, emptyDir: {}}
+{{- end }}
+{{- if and .Values.tags.mlflow .Values.seed.mlflow.enabled }}
+{{- $script := .Files.Get "files/seed/register_dummy_model.py" }}
+{{- $spec := include "deps.seed.mlflow.spec" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: seed-mlflow
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "deps.labels" . | nindent 4 }}
+data:
+  seed.py: |
+    {{- $script | nindent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed-mlflow-{{ print $spec $script | sha256sum | trunc 8 }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "deps.labels" . | nindent 4 }}
+spec:
+  {{- $spec | nindent 2 }}
+{{- end }}
+{{- if and .Values.tags.openmetadata .Values.seed.openmetadata.enabled }}
+{{- $script := .Files.Get "files/seed/seed_sample_tables.py" }}
+{{- $spec := include "deps.seed.openmetadata.spec" . }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: seed-openmetadata
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "deps.labels" . | nindent 4 }}
+data:
+  seed.py: |
+    {{- $script | nindent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed-openmetadata-{{ print $spec $script | sha256sum | trunc 8 }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "deps.labels" . | nindent 4 }}
+spec:
+  {{- $spec | nindent 2 }}
+{{- end }}

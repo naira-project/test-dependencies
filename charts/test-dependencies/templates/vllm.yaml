@@ -1,7 +1,6 @@
 {{/*
-vLLM (CPU). One model, served over the OpenAI-compatible API on 8000. The chat
-template is mounted because small base models ship without one. Mutually
-exclusive with llama.cpp (validate.yaml).
+vLLM on CPU. Chat template mounted: small base models ship without one.
+maxSurge 0: two pods side by side never start on a 2-vCPU node.
 */}}
 {{- if .Values.tags.vllm }}
 apiVersion: v1
@@ -28,6 +27,9 @@ metadata:
   labels: {{- include "deps.labels" . | nindent 4 }}
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 0, maxUnavailable: 1}
   selector:
     matchLabels: {app: vllm}
   template:
@@ -42,6 +44,8 @@ spec:
           configMap: {name: vllm-chat-template}
         - name: dshm
           emptyDir: {medium: Memory, sizeLimit: 1Gi}
+        - name: hf-cache
+          emptyDir: {}
       containers:
         - name: vllm
           image: {{ .Values.vllm.image | quote }}
@@ -51,6 +55,9 @@ spec:
             - {{ .Values.vllm.servedModelName | quote }}
             - --chat-template
             - /etc/vllm/chat-template.jinja
+            {{- if .Values.vllm.enforceEager }}
+            - --enforce-eager
+            {{- end }}
           env:
             - {name: VLLM_CPU_KVCACHE_SPACE, value: {{ .Values.vllm.kvCacheSpace | quote }}}
           ports:
@@ -58,14 +65,19 @@ spec:
           volumeMounts:
             - {name: chat-template, mountPath: /etc/vllm/chat-template.jinja, subPath: chat-template.jinja, readOnly: true}
             - {name: dshm, mountPath: /dev/shm}
+            # runs as root; survives container restarts
+            - {name: hf-cache, mountPath: /root/.cache/huggingface}
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 60   # 10 minutes
           readinessProbe:
             httpGet: {path: /health, port: http}
-            initialDelaySeconds: 60
             periodSeconds: 15
             timeoutSeconds: 5
           livenessProbe:
             httpGet: {path: /health, port: http}
-            initialDelaySeconds: 120
             periodSeconds: 30
             timeoutSeconds: 10
           resources: {{- toYaml .Values.vllm.resources | nindent 12 }}

@@ -111,7 +111,13 @@ func addTools(server *mcp.Server) {
 			DestructiveHint: boolPtr(false),
 			OpenWorldHint:   boolPtr(false),
 		},
-	}, textHandler("3 matching documents (mock)."))
+	}, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// outputSchema requires structuredContent
+		return &mcp.CallToolResult{
+			Content:           []mcp.Content{&mcp.TextContent{Text: "3 matching documents (mock)."}},
+			StructuredContent: map[string]any{"matches": []string{"incident-runbook", "architecture-overview", "onboarding"}},
+		}, nil
+	})
 
 	// Writing tool that reaches an external system.
 	server.AddTool(&mcp.Tool{

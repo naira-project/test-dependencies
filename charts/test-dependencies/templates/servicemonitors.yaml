@@ -1,10 +1,5 @@
 {{- if and .Values.tags.monitoring .Values.tags.litellm }}
-{{/*
-These are CRs of the operator kube-prometheus-stack installs. They ride its
-flag so they can never be applied before the CRDs exist — the split between
-`helm upgrade` and `kubectl apply` in the old Taskfile is what produced that
-failure mode (RFC-009 §7).
-*/}}
+{{/* Same tag as kube-prometheus-stack, so the CRs never precede its CRDs. */}}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -12,7 +7,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "deps.labels" . | nindent 4 }}
-    # kube-prometheus-stack's Prometheus selects ServiceMonitors by this label.
+    # Prometheus selects ServiceMonitors by this label
     release: {{ .Release.Name }}
 spec:
   selector:

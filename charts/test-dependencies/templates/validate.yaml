@@ -18,24 +18,12 @@ inference backends, not a pair (RFC-009 §1).
 {{- fail "keycloak.admin: set existingSecret or create, not both" }}
 {{- end }}
 
-{{- /* LiteLLM's PostgreSQL password: required, and not the upstream sample. */}}
-{{- if .Values.tags.litellm }}
-{{- range $k := list "password" "postgres-password" }}
-{{- $v := index $.Values.litellm.postgresql.auth $k | default "" }}
-{{- if or (eq $v "") (eq $v "NoTaGrEaTpAsSwOrD") }}
-{{- fail (printf "litellm.postgresql.auth.%s is required and must not be the litellm-helm sample value" $k) }}
-{{- end }}
-{{- end }}
+{{- /* LiteLLM must not bring its own PostgreSQL. */}}
+{{- if and .Values.tags.litellm .Values.litellm.db.deployStandalone }}
+{{- fail "litellm.db.deployStandalone must be false: LiteLLM uses Naira's PostgreSQL (litellm.db.*)" }}
 {{- end }}
 
-{{- /*
-OpenMetadata's MySQL user is created by an init script with a literal password;
-the Secret the server reads must carry the same literal.
-*/}}
-{{- if and .Values.tags.openmetadata .Values.secrets.openmetadataMysql.create }}
-{{- $pw := .Values.secrets.openmetadataMysql.password }}
-{{- $sql := index .Values "openmetadata-dependencies" "mysql" "initdbScripts" "init_openmetadata_db_scripts.sql" | default "" }}
-{{- if not (contains (printf "IDENTIFIED BY '%s'" $pw) $sql) }}
-{{- fail "secrets.openmetadataMysql.password does not match the password in openmetadata-dependencies.mysql.initdbScripts" }}
-{{- end }}
+{{- /* OpenMetadata must not bring its own MySQL. */}}
+{{- if and .Values.tags.openmetadata (index .Values "openmetadata-dependencies" "mysql" "enabled") }}
+{{- fail "openmetadata-dependencies.mysql.enabled must be false: OpenMetadata uses Naira's PostgreSQL (openmetadata.openmetadata.config.database)" }}
 {{- end }}
