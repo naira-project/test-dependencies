@@ -50,6 +50,7 @@ about 4 CPUs and 8 GiB.
    helm repo add community-charts https://community-charts.github.io/helm-charts
    helm repo add open-metadata https://helm.open-metadata.org
    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+   helm repo add grafana https://grafana.github.io/helm-charts
    helm dependency build charts/test-dependencies
    ```
 
