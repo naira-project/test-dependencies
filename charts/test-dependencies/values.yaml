@@ -1,0 +1,235 @@
+# test-dependencies: the third-party tier Naira talks to (RFC-009 §1).
+
+# One tag per component (tags, not conditions: see Chart.yaml).
+tags:
+  keycloak: true
+  litellm: true          # database on Naira's PostgreSQL
+  mlflow: true
+  mcpMock: false          # test double; on in values-dev.yaml
+  openmetadata: false
+  monitoring: false      # kube-prometheus-stack and the ServiceMonitors
+  llamacpp: false
+  vllm: false
+
+# Secrets with fixed names. create: false means the operator supplies them.
+secrets:
+  litellmMasterkey:
+    create: false
+    value: ""
+  litellmProviderKeys:
+    create: false
+    data: {}
+  # Secret litellm-db (keys username, password). Password must equal the naira
+  # chart's database.databases.litellm password.
+  litellmDatabase:
+    create: false
+    username: litellm
+    password: ""
+  # Secret openmetadata-db (key password). Password must equal the naira chart's
+  # database.databases.openmetadata password. Username: openmetadata.openmetadata.config.database.auth.username.
+  openmetadataDatabase:
+    create: false
+    password: ""
+
+# ── on by default ─────────────────────────────────────────────────────────────
+
+keycloak:
+  image: quay.io/keycloak/keycloak:26.6.4
+  realmImport:
+    # Empty: bundled files/naira-realm.json (dev credentials). Otherwise a ConfigMap of *.json realms.
+    existingConfigMap: ""
+  hostname: http://localhost:8080   # browser-facing; reached via port-forward
+  admin:
+    # Default: operator supplies Secret <release>-keycloak-admin (keys username, password).
+    existingSecret: ""
+    create: false
+    username: ""
+    password: ""
+  resources:
+    requests: {cpu: 200m, memory: 512Mi}
+    limits: {cpu: 1000m, memory: 1Gi}
+
+litellm:
+  fullnameOverride: litellm
+  # Fixed Secret: the subchart would otherwise generate a new key on every render.
+  masterkeySecretName: litellm-masterkey
+  masterkeySecretKey: masterkey
+  environmentSecrets: [litellm-provider-keys]
+  replicaCount: 1
+  service: {type: ClusterIP, port: 4000}
+  ingress: {enabled: false}
+  # Own database on Naira's PostgreSQL, created by the naira chart's db-init Job
+  # (database.databases.litellm). Install naira first; LiteLLM retries until then.
+  db:
+    deployStandalone: false
+    useExisting: true
+    endpoint: postgres.idp-system.svc.cluster.local:5432
+    database: litellm
+    secret: {name: litellm-db, usernameKey: username, passwordKey: password}
+  # The proxy migrates at startup; the upstream Job is an Argo PreSync hook that never finishes here.
+  migrationJob: {enabled: false}
+  startupProbe: {failureThreshold: 90}   # 15 min for the first migration
+  proxyConfigMap: {create: true, key: config.yaml}
+  proxy_config:
+    model_list:
+      - model_name: chat-small
+        litellm_params:
+          model: mistral/mistral-small-latest
+          api_key: os.environ/MISTRAL_API_KEY
+          api_base: https://api.mistral.ai/v1
+    litellm_settings:
+      callbacks: [prometheus]   # serves /metrics (404 without)
+  resources:
+    requests: {cpu: 200m, memory: 512Mi}
+    limits: {memory: 2Gi}   # 1Gi OOMKills on startup
+
+mlflow:
+  fullnameOverride: mlflow
+  replicaCount: 1
+  service: {enabled: true, type: ClusterIP, port: 5000}
+  backendStore:
+    databaseMigration: false
+    # SQLite on the mlflow-data PVC; upstream's :memory: loses tables between connections.
+    defaultSqlitePath: /mlflow/data/mlflow.db
+  extraVolumes:
+    - {name: data, persistentVolumeClaim: {claimName: mlflow-data}}
+  extraVolumeMounts:
+    - {name: data, mountPath: /mlflow/data}
+  # The server refuses an out-of-date schema unless a table is missing. Image must equal the server's.
+  initContainers:
+    - name: db-upgrade
+      image: burakince/mlflow:3.16.0
+      command: [sh, -c, 'if [ -f /mlflow/data/mlflow.db ]; then mlflow db upgrade sqlite:////mlflow/data/mlflow.db; fi']
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities: {drop: [ALL]}
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+      volumeMounts:
+        - {name: data, mountPath: /mlflow/data}
+        - {name: tmp, mountPath: /tmp}
+  strategy:
+    type: Recreate   # one SQLite file on a ReadWriteOnce volume
+  extraArgs:
+    allowed-hosts: "*"   # else MLflow 3.x rejects the kubelet's probes
+    workers: "1"         # 4 workers OOMKill
+  extraEnvVars:
+    OPENBLAS_NUM_THREADS: "1"
+    OMP_NUM_THREADS: "1"
+    MKL_NUM_THREADS: "1"
+    NUMEXPR_NUM_THREADS: "1"
+    VECLIB_MAXIMUM_THREADS: "1"
+  resources:
+    requests: {cpu: 200m, memory: 512Mi}
+    limits: {cpu: 1000m, memory: 2Gi}
+
+# Size of PVC mlflow-data. Top-level: the mlflow subchart's schema rejects unknown keys.
+mlflowStorage: 1Gi
+
+mcpMock:
+  # Test double for the catalog's mcp-servers plugin (images/mcp-mock).
+  image:
+    registry: ghcr.io/naira-project
+    repository: test-dependencies/mcp-mock
+    tag: ""           # default: the chart's appVersion
+  imagePullSecrets: []   # needed while the ghcr package is private, e.g. [{name: ghcr-pull}]
+  port: 8080
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {cpu: 200m, memory: 128Mi}
+
+# ── sample data (templates/seed.yaml) ─────────────────────────────────────────
+seed:
+  backoffLimit: 10       # retries while the server starts
+  mlflow:
+    enabled: false
+    image: burakince/mlflow:3.16.0   # keep equal to the mlflow subchart's image
+  openmetadata:
+    enabled: false
+    image: python:3.13-slim
+    requests: requests==2.32.3   # installed by the Job at start
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+
+# ── off by default ────────────────────────────────────────────────────────────
+
+# Airflow off: the plugin only reads the REST API, and it needs ReadWriteMany.
+# MySQL off: OpenMetadata uses its own database on Naira's PostgreSQL.
+openmetadata-dependencies:
+  airflow:
+    enabled: false
+  mysql:
+    enabled: false
+
+# Built-in user admin/admin (upstream default).
+openmetadata:
+  fullnameOverride: openmetadata
+  openmetadata:
+    config:
+      # Own database on Naira's PostgreSQL, created by the naira chart's db-init Job
+      # (database.databases.openmetadata). Install naira first.
+      database:
+        host: postgres.idp-system.svc.cluster.local
+        port: 5432
+        driverClass: org.postgresql.Driver
+        dbScheme: postgresql
+        databaseName: openmetadata
+        auth:
+          username: openmetadata   # plain value: the subchart cannot read it from a Secret
+          password: {secretRef: openmetadata-db, secretKey: password}
+        dbParams: sslmode=disable
+        # Main pool only (upstream 10-50); OpenMetadata opens ~17 more outside it.
+        # The shared server allows 100 (LiteLLM and the catalog included).
+        initialSize: 2
+        minSize: 2
+        maxSize: 10
+      # No Airflow; with auth on, upstream mounts a Secret that does not exist.
+      pipelineServiceClientConfig:
+        enabled: false
+        airflow:
+          auth:
+            enabled: false
+
+
+kube-prometheus-stack:
+  grafana:
+    adminPassword: grafana-local-admin   # fixed: generated otherwise on every render
+
+llamacpp:
+  # Pinned by digest: `server` moves.
+  image: ghcr.io/ggml-org/llama.cpp:server@sha256:c789283572ba78c2699b8945a96e654c850f938a717883f2e6187a14adac698f
+  downloadImage: curlimages/curl:8.11.1
+  storage: 3Gi        # model cache PVC per model; a model's `storage` overrides it
+  fsGroup: 1000       # EBS volumes are root-owned; the download runs unprivileged
+  # One Deployment and Service per entry. `name` is the Service name.
+  models:
+    - name: llama-qwen25-05b
+      modelFile: qwen2.5-0.5b-instruct-q4_k_m.gguf
+      downloadUrl: https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf
+      contextSize: "512"
+      threads: "2"
+      readinessDelay: 2
+      resources:
+        requests: {cpu: 300m, memory: 256Mi}
+        limits: {cpu: 2000m, memory: 1Gi}
+    - name: llama-dummy-model
+      modelFile: tiny-llama3-test-q2_k.gguf
+      downloadUrl: https://huggingface.co/tensorblock/tiny-llama3-test-GGUF/resolve/main/tiny-llama3-test-Q2_K.gguf
+      readinessDelay: 1
+      resources:
+        requests: {cpu: 50m, memory: 64Mi}
+        limits: {cpu: 200m, memory: 128Mi}
+
+vllm:
+  # Pinned by digest: `latest` moves.
+  image: vllm/vllm-openai-cpu:v0.31.0@sha256:495c84fe30f3572b83a78100a1e8ba423dbb77fc532ecefebe114e6b77327bd9
+  model: facebook/opt-125m
+  servedModelName: opt-125m
+  kvCacheSpace: "1"   # GiB of CPU KV cache
+  enforceEager: true  # skips the torch.compile warm-up, too slow on 1 CPU
+  resources:
+    requests: {cpu: 1000m, memory: 4Gi}   # measured: ~1 CPU, 3.1 GiB while starting
+    limits: {cpu: 1000m, memory: 6Gi}

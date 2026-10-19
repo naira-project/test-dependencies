@@ -1,0 +1,17 @@
+{{/* Fails the release on invalid values. No leading underscore: a partial's `fail` never runs. */}}
+{{- if and .Values.tags.llamacpp .Values.tags.vllm }}
+{{- fail "tags.llamacpp and tags.vllm are mutually exclusive inference backends — enable one, not both" }}
+{{- end }}
+{{- if and .Values.tags.keycloak .Values.keycloak.admin.create .Values.keycloak.admin.existingSecret }}
+{{- fail "keycloak.admin: set existingSecret or create, not both" }}
+{{- end }}
+
+{{- /* LiteLLM must not bring its own PostgreSQL. */}}
+{{- if and .Values.tags.litellm .Values.litellm.db.deployStandalone }}
+{{- fail "litellm.db.deployStandalone must be false: LiteLLM uses Naira's PostgreSQL (litellm.db.*)" }}
+{{- end }}
+
+{{- /* OpenMetadata must not bring its own MySQL. */}}
+{{- if and .Values.tags.openmetadata (index .Values "openmetadata-dependencies" "mysql" "enabled") }}
+{{- fail "openmetadata-dependencies.mysql.enabled must be false: OpenMetadata uses Naira's PostgreSQL (openmetadata.openmetadata.config.database)" }}
+{{- end }}

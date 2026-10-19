@@ -1,0 +1,6 @@
+chart-dirs:
+  - charts
+validate-maintainers: false
+# Chart version is set by release CI; until that exists, do not require a
+# manual bump on every chart change.
+check-version-increment: false
