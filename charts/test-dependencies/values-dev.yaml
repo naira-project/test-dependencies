@@ -86,8 +86,6 @@ litellm:
           # local llama.cpp (tags.llamacpp)
           model: openai/qwen2.5-0.5b-instruct
           api_base: http://llama-qwen25-05b:8080/v1
-    litellm_settings:
-      prometheus_initialize_budget_metrics: true
     mcp_servers:
       mock_kb:
         url: http://mcp-mock:8080/mcp
