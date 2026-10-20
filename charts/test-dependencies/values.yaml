@@ -235,17 +235,6 @@ kube-prometheus-stack:
     adminPassword: grafana-local-admin
     additionalDataSources:
       - {name: Loki, type: loki, uid: loki, access: proxy, url: "http://loki:3100"}
-  prometheus:
-    prometheusSpec:
-      # Needed by the YACE ServiceMonitor.
-      serviceMonitorSelectorNilUsesHelmValues: false
-      # Likewise the podMonitors and rules if it is added later.
-      podMonitorSelectorNilUsesHelmValues: false
-
-servicemonitors:
-  # Gated by tags.monitoring together with kube-prometheus-stack, so the CRs
-  # can never be applied before the operator that defines them.
-  catalogPort: 8090
 
 llamacpp:
   # Pinned by digest: `server` moves.
@@ -335,8 +324,15 @@ alloy:
             source_labels = ["__meta_kubernetes_pod_container_name"]
             target_label  = "container"
           }
+          // Fall back to app.kubernetes.io/name (e.g. litellm pods have no `app` label);
+          // the `app` label below overrides it when present and non-empty.
+          rule {
+            source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+            target_label  = "app"
+          }
           rule {
             source_labels = ["__meta_kubernetes_pod_label_app"]
+            regex         = "(.+)"
             target_label  = "app"
           }
         }
@@ -357,10 +353,9 @@ yace:
     secret:
       name: yace-aws-credentials
 
-  # Picked up by Prometheus because prometheus-values.yaml sets
-  # serviceMonitorSelectorNilUsesHelmValues: false.
+  # ServiceMonitor is created by the chart's own templates/servicemonitors.yaml file.
   serviceMonitor:
-    enabled: true
+    enabled: false
 
   # YACE job config: https://github.com/prometheus-community/yet-another-cloudwatch-exporter/blob/master/docs/configuration.md
   # Metric names follow aws_<namespace>_<metric>_<statistic> in snake_case,

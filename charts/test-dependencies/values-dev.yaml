@@ -226,11 +226,9 @@ kube-prometheus-stack:
 
 
   # ── Grafana ─────────────────────────────────────────────────────────────────────
-  # Pre-configured with admin/admin login.
   # The chart auto-provisions a datasource pointing to the in-cluster Prometheus.
   grafana:
     enabled: true
-    adminPassword: admin
     resources:
       requests:
         cpu: 100m
@@ -249,6 +247,8 @@ kube-prometheus-stack:
   # or "what's the deployment status"
   kubeStateMetrics:
     enabled: true
+  # Subchart values: resources must be set on the kube-state-metrics subchart key
+  kube-state-metrics:
     resources:
       requests:
         cpu: 50m
@@ -263,6 +263,8 @@ kube-prometheus-stack:
   # resource utilisation.
   nodeExporter:
     enabled: true
+  # Subchart values: resources must be set on the prometheus-node-exporter subchart key
+  prometheus-node-exporter:
     resources:
       requests:
         cpu: 25m
@@ -286,16 +288,4 @@ kube-prometheus-stack:
 
   # Handles alerts fired by Prometheus (e.g. routing to email/Slack/etc.).
   alertmanager:
-    enabled: false
-
-  # Would be needed if we wanted to autoscale deployments based on Prometheus metrics
-  prometheusAdapter:
-    enabled: false
-
-  # Long-term, cross-cluster metrics storage and querying.
-  thanos:
-    enabled: false
-
-  # Windows node-exporter
-  windows:
     enabled: false

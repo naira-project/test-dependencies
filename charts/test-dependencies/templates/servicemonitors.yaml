@@ -45,3 +45,24 @@ spec:
       interval: 15s
       scrapeTimeout: 10s
 {{- end }}
+{{- if and .Values.tags.monitoring .Values.tags.yace }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: yace
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "deps.labels" . | nindent 4 }}
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    matchLabels:
+      # Helm sets a subchart's .Chart.Name to its alias, hence yace.
+      app.kubernetes.io/name: yace
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 60s
+{{- end }}
