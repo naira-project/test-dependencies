@@ -29,16 +29,31 @@ inference backends, not a pair (RFC-009 §1).
 Langfuse's bundled stores. An empty password is generated with `randAlphaNum`
 and re-rolls on every render, so an auto-synced Application rewrites the Secret
 forever while the store keeps what it was bootstrapped with. Required, like
-litellm's. ClickHouse is absent: its password lives in clickhouse-auth, which
-both ends read.
+litellm's — but only for a store this release actually deploys. Pointed at
+something that already exists, the password belongs to that server and is
+supplied the way it documents. ClickHouse is absent from the list entirely:
+its password lives in clickhouse-auth, which both ends read.
 */}}
 {{- if .Values.tags.langfuse }}
-{{- range $path := list "postgresql.auth.password" "redis.auth.password" "s3.auth.rootPassword" }}
-{{- $v := $.Values.langfuse -}}
-{{- range $k := splitList "." $path }}{{- $v = index ($v | default dict) $k }}{{- end }}
-{{- if not $v }}
-{{- fail (printf "langfuse.%s is required when tags.langfuse is on — an empty value is regenerated on every render" $path) }}
+{{- range $store := list
+      (dict "deploy" $.Values.langfuse.postgresql.deploy "path" "postgresql.auth.password" "value" $.Values.langfuse.postgresql.auth.password)
+      (dict "deploy" $.Values.langfuse.redis.deploy      "path" "redis.auth.password"      "value" $.Values.langfuse.redis.auth.password)
+      (dict "deploy" $.Values.langfuse.s3.deploy         "path" "s3.auth.rootPassword"     "value" $.Values.langfuse.s3.auth.rootPassword) }}
+{{- if and $store.deploy (not $store.value) }}
+{{- fail (printf "langfuse.%s is required while its store is deployed by this chart — an empty value is regenerated on every render" $store.path) }}
 {{- end }}
+{{- end }}
+
+{{- /*
+An external PostgreSQL has no name the chart can infer, unlike the bundled one
+whose Service it derives from the release. Empty here, langfuse builds a
+DATABASE_URL pointing at nothing and the pods fail on connect instead of on
+render. S3 gets no equivalent check on purpose: against AWS the endpoint is
+meant to be empty so the SDK resolves it from the region, and credentials may
+come from IRSA rather than from any value this chart can see.
+*/}}
+{{- if and (not .Values.langfuse.postgresql.deploy) (not .Values.langfuse.postgresql.host) }}
+{{- fail "langfuse.postgresql.host is required when langfuse.postgresql.deploy is false — name the server Langfuse should connect to" }}
 {{- end }}
 
 {{- /*

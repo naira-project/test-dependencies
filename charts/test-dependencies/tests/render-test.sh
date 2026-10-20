@@ -197,6 +197,35 @@ check "dev+langfuse: Langfuse connects to the in-chart Service" "http://clickhou
 check "langfuse: no clickhouse-auth Secret by default" "" \
   "$(render "${LF[@]}" -f "$CHART/values-dev.yaml" --set secrets.clickhouseAuth.create=false \
      | yq ea 'select(.kind == "Secret" and .metadata.name == "clickhouse-auth") | .metadata.name')"
+# Each bundled store can be swapped for one that already exists. The password
+# guards must follow the store: required while this chart deploys it, and out
+# of the way once it does not.
+PGEXT=(--set langfuse.postgresql.deploy=false --set langfuse.postgresql.host=pg.example.internal
+       --set langfuse.postgresql.auth.password= --set langfuse.postgresql.auth.existingSecret=langfuse-db
+       --set langfuse.postgresql.auth.secretKeys.userPasswordKey=password)
+check "postgres: deploy=false renders no PostgreSQL of its own" "0" \
+  "$(render "${DEVLF[@]}" "${PGEXT[@]}" | yq ea '[select(.metadata.name == "langfuse-postgresql")] | length')"
+check "postgres: Langfuse is pointed at the external host" "pg.example.internal" \
+  "$(render "${DEVLF[@]}" "${PGEXT[@]}" | yq "$LFWEB | .env[] | select(.name == \"DATABASE_HOST\") | .value")"
+check "postgres: external credentials come from the operator's Secret" "langfuse-db/password" \
+  "$(render "${DEVLF[@]}" "${PGEXT[@]}" | yq "$LFWEB | .env[] | select(.name == \"DATABASE_PASSWORD\") | .valueFrom.secretKeyRef | .name + \"/\" + .key")"
+must_fail "postgres: an external server must be named" "langfuse.postgresql.host is required" \
+  "${DEVLF[@]}" --set langfuse.postgresql.deploy=false --set langfuse.postgresql.host=
+# AWS: endpoint deliberately empty so the SDK resolves it from the region, and
+# no keys at all because the pod authenticates through its role.
+S3AWS=(--set langfuse.s3.deploy=false --set langfuse.s3.auth.rootPassword=
+       --set langfuse.s3.bucket=naira-langfuse --set langfuse.s3.region=eu-central-1
+       --set langfuse.s3.forcePathStyle=false)
+check "s3: deploy=false renders no SeaweedFS of its own" "0" \
+  "$(render "${DEVLF[@]}" "${S3AWS[@]}" | yq ea '[select(.metadata.name == "langfuse-s3-all-in-one")] | length')"
+check "s3: AWS bucket, region and path style reach the pods" "naira-langfuse,eu-central-1,false" \
+  "$(render "${DEVLF[@]}" "${S3AWS[@]}" | yq ea "[$LFWEB | .env[] | select(.name | test(\"S3_EVENT_UPLOAD_(BUCKET|REGION|FORCE_PATH_STYLE)\$\")) | .value] | join(\",\")")"
+check "s3: no endpoint is set for AWS, so the SDK resolves one" "0" \
+  "$(render "${DEVLF[@]}" "${S3AWS[@]}" | yq ea "[$LFWEB | .env[] | select(.name == \"LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT\")] | length")"
+check "s3: an S3-compatible endpoint takes credentials by reference" "http://minio.storage.svc:9000,langfuse-s3/access-key-id" \
+  "$(render "${DEVLF[@]}" "${S3AWS[@]}" --set langfuse.s3.endpoint=http://minio.storage.svc:9000 \
+       --set langfuse.s3.accessKeyId.secretKeyRef.name=langfuse-s3 --set langfuse.s3.accessKeyId.secretKeyRef.key=access-key-id \
+     | yq ea "[$LFWEB | .env[] | select(.name == \"LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT\") | .value, $LFWEB | .env[] | select(.name == \"LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID\") | .valueFrom.secretKeyRef | .name + \"/\" + .key] | join(\",\")")"
 # An adopter with their own ClickHouse drops ours and keeps the rest.
 check "langfuse: clickhouse.deploy=false drops the server, keeps Langfuse" "langfuse-web" \
   "$(render "${DEVLF[@]}" --set clickhouse.deploy=false --set langfuse.clickhouse.host=ch.example.svc \

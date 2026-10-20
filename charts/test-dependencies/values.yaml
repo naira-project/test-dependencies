@@ -210,8 +210,8 @@ seed:
 # ClickHouse, for Langfuse. Rendered here (templates/clickhouse.yaml) and not
 # by the langfuse subchart, whose ClickHouse is a pair of operator CRs — that
 # would make the ClickHouse operator and cert-manager prerequisites of this
-# chart. Rides tags.langfuse; deploy: false points Langfuse at a ClickHouse you
-# already run (langfuse.clickhouse.host below must name it).
+# chart. Rides tags.langfuse; deploy: false points Langfuse at a ClickHouse that
+# already runs (langfuse.clickhouse.host below must name it).
 clickhouse:
   deploy: true
   # What Langfuse recommends for 4.x, the version its operator CRs pin too.
@@ -284,16 +284,36 @@ langfuse:
   # other two stores are renamed for symmetry; langfuse resolves its hostnames
   # through these same keys.
   postgresql:
+    # true renders the bundled server below; false renders none of it and
+    # points Langfuse at a server that already exists — managed, or one this
+    # tier shares. The keys down to `auth` are that switch.
+    deploy: true
+    host: ""                # required when deploy: false, i.e. when we want to connect it to already hosted postgresql (validate.yaml)
+    port: null              # 5432 unless set
+    # For a connection through a pooler: migrations need to reach the server
+    # directly, and a user without CREATE DATABASE needs a shadow database.
+    directUrl: ""
+    shadowDatabaseUrl: ""
     fullnameOverride: langfuse-postgresql
     auth:
-      # The bundled stores' passwords, generated with `randAlphaNum` when left
+      # Which database and role Langfuse uses — created by the subchart when
+      # deploy is true, selected on the server when it is false.
+      database: langfuse
+      username: langfuse
+      # A bundled store's password, generated with `randAlphaNum` when left
       # empty — kept by `lookup` on a live upgrade, but re-rolled by any render
       # that cannot read the cluster, which is every Argo CD diff. Set per
-      # environment; templates/validate.yaml rejects the empty value. Not held
-      # in a Secret of this chart's making — langfuse bootstraps its subcharts
-      # from Secrets it writes itself, so `existingSecret` would mean
-      # rebuilding them.
+      # environment; templates/validate.yaml rejects the empty value while the
+      # store is ours. Not held in a Secret of this chart's making: langfuse
+      # bootstraps its subcharts from Secrets it writes itself, so
+      # `existingSecret` here would mean rebuilding them.
       password: ""
+      # The other half of deploy: false — the operator's Secret holding the
+      # password of the server Langfuse connects to. Ignored, and left empty,
+      # while the bundled server is the one in use.
+      existingSecret: ""
+      secretKeys:
+        userPasswordKey: password
     storage:
       requestedSize: 5Gi
     resources:
@@ -309,6 +329,29 @@ langfuse:
       requests: {cpu: 50m, memory: 128Mi}
       limits: {memory: 256Mi}
   s3:
+    # true renders the bundled SeaweedFS below, an S3 gateway for a cluster
+    # with no object storage of its own; false renders none of it and points
+    # Langfuse at an external S3. Nothing in this block is required, because
+    # what a given environment needs differs: against AWS the endpoint stays
+    # empty so the SDK resolves it from the region, path style goes off for
+    # virtual-hosted buckets, and the credentials below stay empty too —
+    # an IRSA role on langfuse.serviceAccount beats long-lived keys. An
+    # S3-compatible server (MinIO, Ceph) is the opposite: a named endpoint,
+    # path style on, and keys by reference.
+    deploy: true
+    storageProvider: s3     # or azure, gcs
+    bucket: langfuse
+    region: auto
+    endpoint: ""            # empty on AWS; the server's URL otherwise
+    forcePathStyle: true    # false for AWS
+    # By reference, never by value. `value:` exists upstream and is the reason
+    # to say so: a key written here lands in the rendered Deployment.
+    accessKeyId:
+      secretKeyRef: {name: "", key: ""}
+    secretAccessKey:
+      secretKeyRef: {name: "", key: ""}
+    # eventUpload, batchExport and mediaUpload each override all of the above
+    # when one of them needs a bucket of its own.
     fullnameOverride: langfuse-s3
     auth:
       rootPassword: ""
