@@ -225,6 +225,9 @@ clickhouse:
   user: default
   database: default
   storage: 10Gi
+  # Empty means the cluster's default class. Each of langfuse's four volumes
+  # takes its own, under the key its subchart happens to call it.
+  storageClass: ""
   resources:
     requests: {cpu: 500m, memory: 1Gi}
     limits: {memory: 2Gi}
@@ -322,6 +325,7 @@ langfuse:
         userPasswordKey: password
     storage:
       requestedSize: 5Gi
+      className: ""         # empty: cluster's default class (kind: standard, EKS: gp3, io1/io1, efs-sc)
     resources:
       requests: {cpu: 100m, memory: 256Mi}
       limits: {memory: 512Mi}
@@ -353,6 +357,7 @@ langfuse:
     # Langfuse's job queue lives in this store, so eviction loses work.
     dataStorage:
       requestedSize: 2Gi
+      className: ""         # empty: cluster's default class (kind: standard, EKS: gp3, io1/io1, efs-sc)
     resources:
       requests: {cpu: 50m, memory: 128Mi}
       limits: {memory: 256Mi}
@@ -392,6 +397,8 @@ langfuse:
     allInOne:
       data:
         size: 5Gi
+        # seaweedfs calls it storageClass, not className.
+        storageClass: ""    # empty: cluster's default class (kind: standard, EKS: gp3, io1/io1, efs-sc)
       resources:
         requests: {cpu: 100m, memory: 256Mi}
         limits: {cpu: 1, memory: 1Gi}

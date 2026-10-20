@@ -248,6 +248,21 @@ check "redis: the connection string carries host, port and database" "redis://de
 # that ever stops being true this fails, which is the point of asserting it.
 must_fail "redis: an external server must be named (by the subchart)" "Redis host must be configured" \
   "${DEVLF[@]}" --set langfuse.redis.deploy=false --set langfuse.redis.host=
+# Storage classes. Empty must mean "omit the field": `storageClassName: ""` is
+# not the cluster default, it switches dynamic provisioning off and leaves the
+# claim Pending, so a render that emits one is a bug rather than a no-op.
+check "storage: no storageClassName is emitted when none is configured" "0" \
+  "$(render "${DEVLF[@]}" | grep -c storageClassName || true)"
+SC=(--set clickhouse.storageClass=fast-ssd
+    --set langfuse.postgresql.storage.className=pg-class
+    --set langfuse.redis.dataStorage.className=redis-class
+    --set langfuse.s3.allInOne.data.storageClass=bulk-hdd)
+check "storage: each langfuse volume takes its own class (PVCs)" \
+  "langfuse-s3-all-in-one-data=bulk-hdd,langfuse-valkey=redis-class" \
+  "$(render "${DEVLF[@]}" "${SC[@]}" | yq ea '[select(.kind == "PersistentVolumeClaim" and (.metadata.name | test("^langfuse"))) | .metadata.name + "=" + .spec.storageClassName] | sort | join(",")')"
+check "storage: each langfuse volume takes its own class (StatefulSets)" \
+  "clickhouse=fast-ssd,langfuse-postgresql=pg-class" \
+  "$(render "${DEVLF[@]}" "${SC[@]}" | yq ea '[select(.kind == "StatefulSet" and (.metadata.name | test("^clickhouse|^langfuse"))) | .metadata.name + "=" + .spec.volumeClaimTemplates[0].spec.storageClassName] | sort | join(",")')"
 # An adopter with their own ClickHouse drops ours and keeps the rest.
 check "langfuse: clickhouse.deploy=false drops the server, keeps Langfuse" "langfuse-web" \
   "$(render "${DEVLF[@]}" --set clickhouse.deploy=false --set langfuse.clickhouse.host=ch.example.svc \

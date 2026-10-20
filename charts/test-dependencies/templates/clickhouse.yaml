@@ -86,6 +86,15 @@ spec:
         labels: {{- include "deps.labels" . | nindent 10 }}
       spec:
         accessModes: [ReadWriteOnce]
+        {{- /*
+        Omitted when empty, never written as "". The empty string is not
+        "whatever the cluster defaults to" — it turns dynamic provisioning off
+        and binds only to a PV that carries no class, so the claim would sit
+        Pending on a cluster whose default class would have served it.
+        */}}
+        {{- with .Values.clickhouse.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
         resources:
           requests:
             storage: {{ .Values.clickhouse.storage }}
