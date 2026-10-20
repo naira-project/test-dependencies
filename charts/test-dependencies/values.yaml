@@ -83,6 +83,7 @@ keycloak:
 
 litellm:
   fullnameOverride: litellm
+  image: {tag: v1.84.0}
   # Fixed Secret: the subchart would otherwise generate a new key on every render.
   masterkeySecretName: litellm-masterkey
   masterkeySecretKey: masterkey
@@ -112,6 +113,7 @@ litellm:
     litellm_settings:
       callbacks: [prometheus]   # serves /metrics (404 without)
       prometheus_initialize_budget_metrics: true
+      require_auth_for_metrics_endpoint: true
   # INFO logs one line per request naming the upstream model, which is what
   # the UI's "View Logs" link filters the proxy's logs on.
   envVars:

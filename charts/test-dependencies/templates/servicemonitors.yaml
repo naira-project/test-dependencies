@@ -17,7 +17,7 @@ spec:
       path: /metrics
       interval: 30s
       # LiteLLM requires the proxy master key as a bearer token on every
-      # route, including /metrics.
+      # route, including /metrics. This is needed when litellm_settings.require_auth_for_metrics_endpoint flag is set to true.
       authorization:
         credentials:
           name: {{ .Values.litellm.masterkeySecretName }}

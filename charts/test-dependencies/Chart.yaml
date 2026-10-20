@@ -11,7 +11,7 @@ dependencies:
   # No PostgreSQL: LiteLLM uses its own database on Naira's server (litellm.db.*).
   - name: litellm-helm
     alias: litellm
-    version: "1.82.3"
+    version: "1.84.0"
     repository: oci://docker.litellm.ai/berriai
     tags: [litellm]
   - name: mlflow
