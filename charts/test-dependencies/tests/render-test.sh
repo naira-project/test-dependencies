@@ -200,9 +200,12 @@ check "langfuse: no clickhouse-auth Secret by default" "" \
 # Each bundled store can be swapped for one that already exists. The password
 # guards must follow the store: required while this chart deploys it, and out
 # of the way once it does not.
+# A working external PostgreSQL, which means dropping the init container that
+# waits on the bundled Service — see the guard asserted below.
 PGEXT=(--set langfuse.postgresql.deploy=false --set langfuse.postgresql.host=pg.example.internal
        --set langfuse.postgresql.auth.password= --set langfuse.postgresql.auth.existingSecret=langfuse-db
-       --set langfuse.postgresql.auth.secretKeys.userPasswordKey=password)
+       --set langfuse.postgresql.auth.secretKeys.userPasswordKey=password
+       --set-json 'langfuse.langfuse.extraInitContainers=[]')
 check "postgres: deploy=false renders no PostgreSQL of its own" "0" \
   "$(render "${DEVLF[@]}" "${PGEXT[@]}" | yq ea '[select(.metadata.name == "langfuse-postgresql")] | length')"
 check "postgres: Langfuse is pointed at the external host" "pg.example.internal" \
@@ -211,6 +214,14 @@ check "postgres: external credentials come from the operator's Secret" "langfuse
   "$(render "${DEVLF[@]}" "${PGEXT[@]}" | yq "$LFWEB | .env[] | select(.name == \"DATABASE_PASSWORD\") | .valueFrom.secretKeyRef | .name + \"/\" + .key")"
 must_fail "postgres: an external server must be named" "langfuse.postgresql.host is required" \
   "${DEVLF[@]}" --set langfuse.postgresql.deploy=false --set langfuse.postgresql.host=
+# The init container names the bundled Service and cannot be templated, so
+# going external without retargeting it renders a release that waits in Init
+# forever. Render-valid and dead, which is why the guard exists.
+must_fail "postgres: the init container cannot be left on the bundled Service" "extraInitContainers still waits" \
+  "${DEVLF[@]}" --set langfuse.postgresql.deploy=false --set langfuse.postgresql.host=pg.example.internal
+check "postgres: emptying the init container clears the way for an external one" "0" \
+  "$(render "${DEVLF[@]}" "${PGEXT[@]}" --set-json 'langfuse.langfuse.extraInitContainers=[]' \
+     | yq ea "[$LFWEB | .env[] | select(.name == \"DATABASE_HOST\") | .value] | length | . - 1")"
 # AWS: endpoint deliberately empty so the SDK resolves it from the region, and
 # no keys at all because the pod authenticates through its role.
 S3AWS=(--set langfuse.s3.deploy=false --set langfuse.s3.auth.rootPassword=
@@ -226,6 +237,17 @@ check "s3: an S3-compatible endpoint takes credentials by reference" "http://min
   "$(render "${DEVLF[@]}" "${S3AWS[@]}" --set langfuse.s3.endpoint=http://minio.storage.svc:9000 \
        --set langfuse.s3.accessKeyId.secretKeyRef.name=langfuse-s3 --set langfuse.s3.accessKeyId.secretKeyRef.key=access-key-id \
      | yq ea "[$LFWEB | .env[] | select(.name == \"LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT\") | .value, $LFWEB | .env[] | select(.name == \"LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID\") | .valueFrom.secretKeyRef | .name + \"/\" + .key] | join(\",\")")"
+REDISEXT=(--set langfuse.redis.deploy=false --set langfuse.redis.host=redis.example.internal
+          --set langfuse.redis.auth.password= --set langfuse.redis.auth.existingSecret=langfuse-redis
+          --set langfuse.redis.auth.existingSecretPasswordKey=password)
+check "redis: deploy=false renders no Valkey of its own" "0" \
+  "$(render "${DEVLF[@]}" "${REDISEXT[@]}" | yq ea '[select(.metadata.name == "langfuse-valkey")] | length')"
+check "redis: the connection string carries host, port and database" "redis://default:\$(REDIS_PASSWORD)@redis.example.internal:6379/0" \
+  "$(render "${DEVLF[@]}" "${REDISEXT[@]}" | yq ea "[$LFWEB | .env[] | select(.name == \"REDIS_CONNECTION_STRING\") | .value] | join(\"\")")"
+# Upstream rejects an unnamed external Redis, so validate.yaml does not. If
+# that ever stops being true this fails, which is the point of asserting it.
+must_fail "redis: an external server must be named (by the subchart)" "Redis host must be configured" \
+  "${DEVLF[@]}" --set langfuse.redis.deploy=false --set langfuse.redis.host=
 # An adopter with their own ClickHouse drops ours and keeps the rest.
 check "langfuse: clickhouse.deploy=false drops the server, keeps Langfuse" "langfuse-web" \
   "$(render "${DEVLF[@]}" --set clickhouse.deploy=false --set langfuse.clickhouse.host=ch.example.svc \

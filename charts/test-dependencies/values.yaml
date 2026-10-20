@@ -256,6 +256,12 @@ langfuse:
     image:
       # The tag is already pinned to appVersion
       pullPolicy: IfNotPresent
+    # Names the bundled Service literally: a subchart value cannot be
+    # templated, and the container is given no env to read the host from. So
+    # with postgresql.deploy: false this has to be retargeted at
+    # postgresql.host or emptied — templates/validate.yaml refuses the render
+    # otherwise, because the pods would wait here forever on a name that no
+    # longer resolves.
     extraInitContainers:
       - name: wait-for-postgresql
         image: postgres:18
@@ -320,9 +326,31 @@ langfuse:
       requests: {cpu: 100m, memory: 256Mi}
       limits: {memory: 512Mi}
   redis:
+    # Valkey, bundled — Langfuse's queue, not a cache. deploy: false points it
+    # at a Redis or Valkey that already runs, and is also what the subchart's
+    # cluster and sentinel modes require; the bundled node is a single one.
+    deploy: true
+    host: ""                # required when deploy: false (validate.yaml)
+    port: 6379
     fullnameOverride: langfuse-valkey
+    tls:
+      # For a managed instance that wants TLS. caPath, certPath and keyPath
+      # are there too, pointing at files mounted into the langfuse pods.
+      enabled: false
     auth:
+      username: default
+      database: 0
+      # Generated with `randAlphaNum` when left empty, like the other bundled
+      # stores — re-rolled by any render that cannot read the cluster.
+      # templates/validate.yaml rejects the empty value while the store is
+      # ours.
       password: ""
+      # The deploy: false half, as for PostgreSQL above.
+      existingSecret: ""
+      existingSecretPasswordKey: ""
+    # Not restated here, but worth knowing before tuning memory: upstream puts
+    # `maxmemory-policy noeviction` in valkeyConfig and rejects anything else.
+    # Langfuse's job queue lives in this store, so eviction loses work.
     dataStorage:
       requestedSize: 2Gi
     resources:

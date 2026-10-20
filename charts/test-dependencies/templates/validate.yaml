@@ -48,12 +48,29 @@ its password lives in clickhouse-auth, which both ends read.
 An external PostgreSQL has no name the chart can infer, unlike the bundled one
 whose Service it derives from the release. Empty here, langfuse builds a
 DATABASE_URL pointing at nothing and the pods fail on connect instead of on
-render. S3 gets no equivalent check on purpose: against AWS the endpoint is
-meant to be empty so the SDK resolves it from the region, and credentials may
-come from IRSA rather than from any value this chart can see.
+render.
+
+Only PostgreSQL. The subchart already rejects an unnamed external Redis or
+ClickHouse, and does it better — its message names the cluster and sentinel
+modes that stand in for a host. S3 is unguarded on both sides on purpose:
+against AWS the endpoint is meant to be empty so the SDK resolves it from the
+region, and credentials may come from IRSA rather than from any value a chart
+can see.
 */}}
 {{- if and (not .Values.langfuse.postgresql.deploy) (not .Values.langfuse.postgresql.host) }}
 {{- fail "langfuse.postgresql.host is required when langfuse.postgresql.deploy is false — name the server Langfuse should connect to" }}
+{{- end }}
+
+{{- /*
+The wait-for-postgresql init container names the bundled Service, because a
+subchart value cannot be templated and the container is handed no env to read
+the host from. Left pointing there with the bundled server gone, it waits on a
+name that will never resolve and the pods sit in Init forever — a healthy
+render and a dead release. Caught here instead.
+*/}}
+{{- if and (not .Values.langfuse.postgresql.deploy)
+           (contains "langfuse-postgresql" (toYaml .Values.langfuse.langfuse.extraInitContainers)) }}
+{{- fail "langfuse.langfuse.extraInitContainers still waits on the bundled langfuse-postgresql Service, which langfuse.postgresql.deploy=false does not create — point it at langfuse.postgresql.host or set extraInitContainers to []" }}
 {{- end }}
 
 {{- /*
