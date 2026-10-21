@@ -9,6 +9,7 @@ tags:
   monitoring: false
   llamacpp: true
   vllm: false
+  yace: false
 
 keycloak:
   admin:
@@ -85,8 +86,6 @@ litellm:
           # local llama.cpp (tags.llamacpp)
           model: openai/qwen2.5-0.5b-instruct
           api_base: http://llama-qwen25-05b:8080/v1
-    litellm_settings:
-      prometheus_initialize_budget_metrics: true
     mcp_servers:
       mock_kb:
         url: http://mcp-mock:8080/mcp
@@ -106,3 +105,187 @@ openmetadata-dependencies:
   opensearch:
     persistence:
       size: 2Gi
+
+# observability stack components' extra dev values, bound to the issue #14
+
+# ── yet-another-cloudwatch-exporter (YACE) values for local kind dev environment ──
+# Pulls metrics from AWS CloudWatch and exposes them on /metrics so the
+# in-cluster Prometheus (kube-prometheus-stack) scrapes them like any other
+# target. Perses then queries them through the existing Prometheus datasource.
+#
+# AWS credentials are NOT set here. Off by default (tags.yace). To enable:
+#   helm upgrade --install ... --set tags.monitoring=true --set tags.yace=true \
+#     --set secrets.yaceAws.create=true \
+#     --set secrets.yaceAws.accessKey=$AWS_ACCESS_KEY_ID \
+#     --set secrets.yaceAws.secretKey=$AWS_SECRET_ACCESS_KEY
+# The chart then creates the `yace-aws-credentials` Secret that aws.secret.name
+# points at.
+#
+# Required IAM permissions: read-only on CloudWatch metrics. Use a dedicated IAM
+# user with only this policy (the AWS-managed CloudWatchReadOnlyAccess also works
+# but additionally exposes logs, alarms and dashboards). CloudWatch read actions
+# do not support resource-level restrictions, hence Resource "*".
+#   {
+#     "Version": "2012-10-17",
+#     "Statement": [{
+#       "Sid": "YaceCloudWatchRead",
+#       "Effect": "Allow",
+#       "Action": [
+#         "cloudwatch:ListMetrics",
+#         "cloudwatch:GetMetricData",
+#         "cloudwatch:GetMetricStatistics"
+#       ],
+#       "Resource": "*"
+#     }]
+#   }
+
+# Everything else (aws.secret.name, extraArgs, serviceMonitor.enabled,
+# testConnection, the job config) is inherited from values.yaml.
+yace:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+  serviceMonitor:
+    interval: 60s
+    timeout: 30s
+
+# ── Grafana Alloy for local kind dev environment ──────────────────────────────
+# Only the sizing is set here; the controller and the pipeline config are
+# inherited from values.yaml.
+alloy:
+  alloy:
+    # UI/clustering are not needed for a single replica.
+    clustering:
+      enabled: false
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+# ── Loki for local kind dev environment ───────────────────────────────────────
+# Single-binary mode and the rest of the setup are inherited from values.yaml;
+# only the smaller retention and volume, and the resource caps, are set here.
+loki:
+  loki:
+    limits_config:
+      retention_period: 72h
+
+  singleBinary:
+    persistence:
+      size: 5Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+kube-prometheus-stack:
+  # ── kube-prometheus-stack values for local kind dev environment ───────────────
+  # Provides: Prometheus Operator, Prometheus, Grafana, kube-state-metrics, node-exporter
+  # Disabled: Alertmanager, Thanos, Windows Exporter, Prometheus Adapter
+
+  # ── Prometheus ──────────────────────────────────────────────────────────────────
+  prometheus:
+    prometheusSpec:
+      # How long to keep raw metric data before discarding it.
+      retention: 7d
+
+      resources:
+        requests:
+          cpu: 200m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 1Gi
+
+      # Persistent volume for metric storage — avoids data loss on pod restart.
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 10Gi
+
+    # Prometheus UI reachable only via kubectl port-forward.
+    ingress:
+      enabled: false
+
+    service:
+      type: ClusterIP
+
+
+  # ── Grafana ─────────────────────────────────────────────────────────────────────
+  # The chart auto-provisions a datasource pointing to the in-cluster Prometheus.
+  grafana:
+    enabled: true
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 768Mi
+    ingress:
+      enabled: false
+    service:
+      type: ClusterIP
+
+  # ── kube-state-metrics ──────────────────────────────────────────────────────────
+  # Translates Kubernetes API objects state into metrics: deployments, pods, nodes, 
+  # services, namespaces, etc. Powers dashboards showing "how many pods are running"
+  # or "what's the deployment status"
+  kubeStateMetrics:
+    enabled: true
+  # Subchart values: resources must be set on the kube-state-metrics subchart key
+  kube-state-metrics:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 100m
+        memory: 256Mi
+
+  # ── node-exporter ───────────────────────────────────────────────────────────────
+  # Runs on every node and exposes hardware / OS metrics: CPU usage, memory,
+  # disk I/O, network traffic, load averages. Gives a node-level view of
+  # resource utilisation.
+  nodeExporter:
+    enabled: true
+  # Subchart values: resources must be set on the prometheus-node-exporter subchart key
+  prometheus-node-exporter:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 50m
+        memory: 64Mi
+
+  # ── Prometheus Operator ─────────────────────────────────────────────────────────
+  # Watches ServiceMonitor CRDs and translate them into Prometheus configuration.
+  prometheusOperator:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+
+  # ── Disabled ────────────────────────────────────────────────
+
+  # Handles alerts fired by Prometheus (e.g. routing to email/Slack/etc.).
+  alertmanager:
+    enabled: false

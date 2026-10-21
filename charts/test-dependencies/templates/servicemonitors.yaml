@@ -16,10 +16,18 @@ spec:
     - port: http
       path: /metrics
       interval: 30s
+      # LiteLLM requires the proxy master key as a bearer token on every
+      # route, including /metrics. This is needed when litellm_settings.require_auth_for_metrics_endpoint flag is set to true.
+      authorization:
+        credentials:
+          name: {{ .Values.litellm.masterkeySecretName }}
+          key: {{ .Values.litellm.masterkeySecretKey }}
 {{- end }}
 {{- if and .Values.tags.monitoring (or .Values.tags.llamacpp .Values.tags.vllm) }}
 ---
-# Whichever backend is on: both Services carry the `inference` label.
+# One monitor for whichever backend is on: both Services carry the
+# `inference` component label and expose /metrics on port `http`
+# (llama.cpp via --metrics, vLLM natively).
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -36,4 +44,25 @@ spec:
       path: /metrics
       interval: 15s
       scrapeTimeout: 10s
+{{- end }}
+{{- if and .Values.tags.monitoring .Values.tags.yace }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: yace
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "deps.labels" . | nindent 4 }}
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    matchLabels:
+      # Helm sets a subchart's .Chart.Name to its alias, hence yace.
+      app.kubernetes.io/name: yace
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 60s
 {{- end }}
