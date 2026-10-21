@@ -11,6 +11,7 @@ tags:
   monitoring: false      # kube-prometheus-stack and the ServiceMonitors
   llamacpp: false
   vllm: false
+  yace: false            # CloudWatch exporter; needs tags.monitoring and AWS credentials
 
 # Secrets with fixed names. create: false means the operator supplies them.
 secrets:
@@ -31,6 +32,38 @@ secrets:
   openmetadataDatabase:
     create: false
     password: ""
+  # Secret `yace-aws-credentials` (keys access_key, secret_key), read by YACE
+  # (yace.aws.secret.name). Never put the values in a file: pass them at install,
+  # --set secrets.yaceAws.accessKey=$AWS_ACCESS_KEY_ID ... Default: the operator
+  # supplies the Secret.
+  #
+  # This chart does not create the keys, it only copies them into the Secret. Create a dedicated IAM user (no console access) in AWS,
+  # attach the read-only policy below, then IAM > user > Security credentials >
+  # Create access key. AWS shows the secret key once, so store it then. With
+  # create: true the keys sit in the Secret only base64-encoded: development
+  # only. In a shared environment keep create: false and supply the Secret
+  # (e.g. an ExternalSecret).
+  #
+  # Access needed: read-only CloudWatch metrics, nothing else (YACE reads
+  # AWS/Bedrock only and never changes anything). CloudWatch read actions do not
+  # support resource-level restrictions, hence Resource "*".
+  #   {
+  #     "Version": "2012-10-17",
+  #     "Statement": [{
+  #       "Sid": "YaceCloudWatchRead",
+  #       "Effect": "Allow",
+  #       "Action": [
+  #         "cloudwatch:ListMetrics",
+  #         "cloudwatch:GetMetricData",
+  #         "cloudwatch:GetMetricStatistics"
+  #       ],
+  #       "Resource": "*"
+  #     }]
+  #   }
+  yaceAws:
+    create: false
+    accessKey: ""
+    secretKey: ""
   # Secret `langfuse-app-credentials`, read through the secretKeyRefs in the
   # langfuse block below. The subchart would otherwise generate all three with
   # `randAlphaNum`, re-rolled on every render — and a rotated SALT or
@@ -44,8 +77,7 @@ secrets:
   # StatefulSet this chart renders and the Langfuse pods that connect to it.
   clickhouseAuth:
     create: false
-    password: ""  
-
+    password: ""
 # ── on by default ─────────────────────────────────────────────────────────────
 
 keycloak:
@@ -66,6 +98,7 @@ keycloak:
 
 litellm:
   fullnameOverride: litellm
+  image: {tag: v1.84.0}
   # Fixed Secret: the subchart would otherwise generate a new key on every render.
   masterkeySecretName: litellm-masterkey
   masterkeySecretKey: masterkey
@@ -94,6 +127,12 @@ litellm:
           api_base: https://api.mistral.ai/v1
     litellm_settings:
       callbacks: [prometheus]   # serves /metrics (404 without)
+      prometheus_initialize_budget_metrics: true
+      require_auth_for_metrics_endpoint: true
+  # INFO logs one line per request naming the upstream model, which is what
+  # the UI's "View Logs" link filters the proxy's logs on.
+  envVars:
+    LITELLM_LOG: INFO
   resources:
     requests: {cpu: 200m, memory: 512Mi}
     limits: {memory: 2Gi}   # 1Gi OOMKills on startup
@@ -418,10 +457,11 @@ openmetadata:
           auth:
             enabled: false
 
-
 kube-prometheus-stack:
   grafana:
-    adminPassword: grafana-local-admin   # fixed: generated otherwise on every render
+    adminPassword: grafana-local-admin
+    additionalDataSources:
+      - {name: Loki, type: loki, uid: loki, access: proxy, url: "http://loki:3100"}
 
 llamacpp:
   # Pinned by digest: `server` moves.
@@ -458,3 +498,121 @@ vllm:
   resources:
     requests: {cpu: 1000m, memory: 4Gi}   # measured: ~1 CPU, 3.1 GiB while starting
     limits: {cpu: 1000m, memory: 6Gi}
+
+loki:
+  fullnameOverride: loki          # Alloy and Grafana depend on this name
+  deploymentMode: SingleBinary    # the default is SimpleScalable with S3
+  loki:
+    auth_enabled: false
+    commonConfig: {replication_factor: 1}
+    storage: {type: filesystem}
+    schemaConfig:
+      configs:
+        - from: "2024-04-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: loki_index_
+            period: 24h
+    compactor: {retention_enabled: true, delete_request_store: filesystem}
+    limits_config: {retention_period: 168h}
+  singleBinary: {replicas: 1, persistence: {enabled: true, size: 10Gi}}
+  backend: {replicas: 0}
+  read: {replicas: 0}
+  write: {replicas: 0}
+  gateway: {enabled: false}
+  chunksCache: {enabled: false}
+  resultsCache: {enabled: false}
+  lokiCanary: {enabled: false}
+  test: {enabled: false}
+
+alloy:
+  controller: {type: deployment, replicas: 1}
+  alloy:
+    configMap:
+      content: |-
+        discovery.kubernetes "pods" {
+          role = "pod"
+        }
+
+        discovery.relabel "pods" {
+          targets = discovery.kubernetes.pods.targets
+
+          rule {
+            source_labels = ["__meta_kubernetes_namespace"]
+            target_label  = "namespace"
+          }
+          rule {
+            source_labels = ["__meta_kubernetes_pod_name"]
+            target_label  = "pod"
+          }
+          rule {
+            source_labels = ["__meta_kubernetes_pod_container_name"]
+            target_label  = "container"
+          }
+          // Fall back to app.kubernetes.io/name (e.g. litellm pods have no `app` label);
+          // the `app` label below overrides it when present and non-empty.
+          rule {
+            source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+            target_label  = "app"
+          }
+          rule {
+            source_labels = ["__meta_kubernetes_pod_label_app"]
+            regex         = "(.+)"
+            target_label  = "app"
+          }
+        }
+
+        loki.source.kubernetes "pods" {
+          targets    = discovery.relabel.pods.output
+          forward_to = [loki.write.default.receiver]
+        }
+
+        loki.write "default" {
+          endpoint {
+            url = "http://loki:3100/loki/api/v1/push"
+          }
+        }
+
+yace:
+  aws:
+    secret:
+      name: yace-aws-credentials
+
+  # ServiceMonitor is created by the chart's own templates/servicemonitors.yaml file.
+  serviceMonitor:
+    enabled: false
+
+  # YACE job config: https://github.com/prometheus-community/yet-another-cloudwatch-exporter/blob/master/docs/configuration.md
+  # Metric names follow aws_<namespace>_<metric>_<statistic> in snake_case,
+  # e.g. AWS/Bedrock InputTokenCount Sum → aws_bedrock_input_token_count_sum.
+  config: |-
+    apiVersion: v1alpha1
+    # Bedrock invocation metrics are dimensioned by ModelId and have no taggable
+    # resources, so they go under customNamespace instead of discovery.
+    customNamespace:
+      - name: bedrock
+        namespace: AWS/Bedrock
+        # Keep in sync with the Bedrock plugin's REGIONS (core/infra/kubernetes/catalog.yaml),
+        # since the UI's per-endpoint panels filter on region.
+        regions:
+          - us-east-1
+          - eu-central-1
+        period: 300
+        length: 600
+        # Report 0 instead of dropping the series when a model had no traffic in
+        # the last period, so per-endpoint charts show idle time rather than gaps.
+        nilToZero: true
+        metrics:
+          - name: Invocations
+            statistics: [Sum]
+          - name: InvocationLatency
+            statistics: [Average]
+          - name: InputTokenCount
+            statistics: [Sum]
+          - name: OutputTokenCount
+            statistics: [Sum]
+
+  testConnection: false
+  extraArgs: {scraping-interval: 300}   # this one drives AWS cost, so it is a default

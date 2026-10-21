@@ -377,6 +377,84 @@ check "seed: none for a component that is off" "" \
 check "own pods run as non-root" "keycloak:true,mcp-mock:true,seed:true,seed:true" \
   "$(render "${DEV[@]}" "${OM[@]}" | yq ea '[select((.kind == "Deployment" or .kind == "Job") and (.metadata.name | test("^(keycloak|mcp-mock|seed-)"))) | .spec.template.spec.containers[] | .name + ":" + (.securityContext.runAsNonRoot | tostring)] | sort | join(",")')"
 
+# observability: LiteLLM metrics scraping
+MON=(--set tags.monitoring=true)
+SM='select(.kind == "ServiceMonitor" and .metadata.name == "litellm") | .spec.endpoints[0]'
+check "litellm requires auth on /metrics" "true" \
+  "$(render | yq 'select(.kind == "ConfigMap" and .metadata.name == "litellm-config") | .data["config.yaml"]' | yq '.litellm_settings.require_auth_for_metrics_endpoint')"
+check "litellm initializes budget metrics" "true" \
+  "$(render | yq 'select(.kind == "ConfigMap" and .metadata.name == "litellm-config") | .data["config.yaml"]' | yq '.litellm_settings.prometheus_initialize_budget_metrics')"
+check "dev: values-dev keeps the litellm_settings from values.yaml" "prometheus true" \
+  "$(render "${DEV[@]}" | yq 'select(.kind == "ConfigMap" and .metadata.name == "litellm-config") | .data["config.yaml"]' | yq '.litellm_settings.callbacks[0] + " " + (.litellm_settings.require_auth_for_metrics_endpoint | tostring)')"
+check "litellm ServiceMonitor scrapes /metrics with the master key as bearer token" "/metrics litellm-masterkey masterkey" \
+  "$(render "${MON[@]}" | yq "$SM | .path + \" \" + .authorization.credentials.name + \" \" + .authorization.credentials.key")"
+check "litellm ServiceMonitor follows litellm.masterkeySecretName" "my-key my-field" \
+  "$(render "${MON[@]}" --set litellm.masterkeySecretName=my-key --set litellm.masterkeySecretKey=my-field \
+     | yq "$SM | .authorization.credentials.name + \" \" + .authorization.credentials.key")"
+check "litellm image is pinned to the chart's version" "v1.84.0" \
+  "$(render | yq "$LITELLM | .image | sub(\".*:\"; \"\")")"
+check "litellm logs at INFO" "INFO" \
+  "$(render | yq "$LITELLM | .env[] | select(.name == \"LITELLM_LOG\") | .value")"
+
+# observability: Loki and Alloy come with tags.monitoring
+check "loki and alloy off without monitoring" "" \
+  "$(render | yq ea 'select((.kind == "StatefulSet" or .kind == "Deployment") and (.metadata.name == "loki" or (.metadata.name | test("alloy$")))) | .metadata.name')"
+check "monitoring: loki and alloy rendered" "loki,t-alloy" \
+  "$(render "${MON[@]}" | yq ea '[select((.kind == "StatefulSet" or .kind == "Deployment") and (.metadata.name == "loki" or (.metadata.name | test("alloy$")))) | .metadata.name] | sort | join(",")')"
+check "loki runs single binary: one StatefulSet, no read/write/backend" "loki" \
+  "$(render "${MON[@]}" | yq ea '[select(.kind == "StatefulSet" and (.metadata.name | test("^(loki|loki-read|loki-write|loki-backend)$"))) | .metadata.name] | join(",")')"
+check "alloy pushes to loki's Service" "http://loki:3100/loki/api/v1/push" \
+  "$(render "${MON[@]}" | yq ea 'select(.kind == "ConfigMap" and (.metadata.name | test("alloy$"))) | .data["config.alloy"]' | grep -o 'http://loki:3100/loki/api/v1/push' | head -1)"
+check "alloy labels logs with namespace, pod, container and app" "4" \
+  "$(render "${MON[@]}" | yq ea 'select(.kind == "ConfigMap" and (.metadata.name | test("alloy$"))) | .data["config.alloy"]' \
+     | grep -cE 'target_label += "(namespace|pod|container)"|target_label += "app"' | awk '{print ($1 >= 4) ? 4 : $1}')"
+check "grafana has a Loki datasource pointing at loki" "http://loki:3100" \
+  "$(render "${MON[@]}" | yq ea 'select(.kind == "ConfigMap" and (.metadata.name | test("grafana-datasource"))) | .data["datasource.yaml"]' \
+     | yq '.datasources[] | select(.name == "Loki") | .url')"
+
+# observability: YACE (CloudWatch exporter)
+YACE=("${MON[@]}" --set tags.yace=true)
+must_fail "yace needs monitoring" "tags.yace needs tags.monitoring" \
+  --set tags.yace=true
+check "yace off by default" "" \
+  "$(render "${MON[@]}" | yq ea 'select(.kind == "Deployment" and .metadata.name == "t-yace") | .metadata.name')"
+check "yace on: Deployment rendered" "t-yace" \
+  "$(render "${YACE[@]}" | yq ea 'select(.kind == "Deployment" and .metadata.name == "t-yace") | .metadata.name')"
+check "yace: no AWS credentials Secret by default" "" \
+  "$(render "${YACE[@]}" | yq ea 'select(.kind == "Secret" and .metadata.name == "yace-aws-credentials") | .metadata.name')"
+check "yace: AWS credentials Secret when create=true" "AK SK" \
+  "$(render "${YACE[@]}" --set secrets.yaceAws.create=true --set secrets.yaceAws.accessKey=AK --set secrets.yaceAws.secretKey=SK \
+     | yq 'select(.kind == "Secret" and .metadata.name == "yace-aws-credentials") | .stringData.access_key + " " + .stringData.secret_key')"
+check "yace: no AWS credentials Secret when yace is off" "" \
+  "$(render "${MON[@]}" --set secrets.yaceAws.create=true --set secrets.yaceAws.accessKey=AK --set secrets.yaceAws.secretKey=SK \
+     | yq ea 'select(.kind == "Secret" and .metadata.name == "yace-aws-credentials") | .metadata.name')"
+must_fail "yace credentials create needs an access key" "secrets.yaceAws.accessKey is required" \
+  "${YACE[@]}" --set secrets.yaceAws.create=true --set secrets.yaceAws.secretKey=SK
+must_fail "yace credentials create needs a secret key" "secrets.yaceAws.secretKey is required" \
+  "${YACE[@]}" --set secrets.yaceAws.create=true --set secrets.yaceAws.accessKey=AK
+check "yace reads its credentials from yace-aws-credentials" "yace-aws-credentials" \
+  "$(render "${YACE[@]}" | yq ea 'select(.kind == "Deployment" and .metadata.name == "t-yace") | .spec.template.spec.containers[0].env[] | select(.valueFrom.secretKeyRef.key == "access_key") | .valueFrom.secretKeyRef.name')"
+check "yace ServiceMonitor from the chart, none from the subchart" "yace" \
+  "$(render "${YACE[@]}" | yq ea '[select(.kind == "ServiceMonitor" and (.metadata.name | test("yace"))) | .metadata.name] | join(",")')"
+check "yace ServiceMonitor carries the release label" "t" \
+  "$(render "${YACE[@]}" | yq 'select(.kind == "ServiceMonitor" and .metadata.name == "yace") | .metadata.labels.release')"
+check "yace ServiceMonitor selects the yace Service" "yace t" \
+  "$(render "${YACE[@]}" | yq 'select(.kind == "ServiceMonitor" and .metadata.name == "yace") | .spec.selector.matchLabels["app.kubernetes.io/name"] + " " + .spec.selector.matchLabels["app.kubernetes.io/instance"]')"
+check "yace ServiceMonitor selector matches a rendered Service" "1" \
+  "$(render "${YACE[@]}" | yq ea '[select(.kind == "Service" and .metadata.labels["app.kubernetes.io/name"] == "yace" and .metadata.labels["app.kubernetes.io/instance"] == "t")] | length')"
+check "no yace ServiceMonitor without tags.yace" "" \
+  "$(render "${MON[@]}" | yq ea 'select(.kind == "ServiceMonitor" and .metadata.name == "yace") | .metadata.name')"
+check "yace scrapes only AWS/Bedrock" "AWS/Bedrock" \
+  "$(render "${YACE[@]}" | yq ea 'select(.kind == "ConfigMap" and (.metadata.name | test("yace"))) | .data["config.yml"]' | yq '.customNamespace[0].namespace')"
+check "yace: scraping-interval is the cost knob, default 300" "true" \
+  "$(render "${YACE[@]}" | yq 'select(.kind == "Deployment" and .metadata.name == "t-yace") | .spec.template.spec.containers[0].command | contains(["--scraping-interval=300"])')"
+check "dev: yace stays off" "" \
+  "$(render "${DEV[@]}" "${MON[@]}" | yq ea 'select(.kind == "Deployment" and .metadata.name == "t-yace") | .metadata.name')"
+check "dev+monitoring+yace: two renders are identical" "yes" \
+  "$(a=$(mktemp); b=$(mktemp); render "${DEV[@]}" "${YACE[@]}" --set secrets.yaceAws.create=true --set secrets.yaceAws.accessKey=AK --set secrets.yaceAws.secretKey=SK > "$a"
+     render "${DEV[@]}" "${YACE[@]}" --set secrets.yaceAws.create=true --set secrets.yaceAws.accessKey=AK --set secrets.yaceAws.secretKey=SK > "$b"
+     cmp -s "$a" "$b" && echo yes || echo no; rm -f "$a" "$b")"
+
 # Every ci/ fixture must still render
 for f in "$CHART"/ci/*-values.yaml; do
   check "ci/$(basename "$f") renders" "ok" \
