@@ -26,15 +26,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0 # ct lint diffs against the target branch
           persist-credentials: false
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.3.0
       - uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.8.0
       - name: Register chart repositories
-        # Helm 4 does not fetch from an unregistered HTTP repository; the OCI
-        # one (litellm) needs no registration.
+        # Helm 4 needs HTTP repos registered; OCI (litellm) does not.
         run: |
           helm repo add community-charts https://community-charts.github.io/helm-charts
           helm repo add open-metadata https://helm.open-metadata.org
@@ -43,9 +41,8 @@ jobs:
       - run: helm lint charts/test-dependencies -f charts/test-dependencies/values-dev.yaml
       - run: charts/test-dependencies/tests/render-test.sh
       - name: ct lint
-        env:
-          TARGET_BRANCH: ${{ github.event.repository.default_branch }}
-        run: ct lint --config ct.yaml --target-branch "$TARGET_BRANCH"
+        # --all: a changed-charts diff is empty on main and on workflow_dispatch
+        run: ct lint --config ct.yaml --all
       - name: Set up kubeconform
         env:
           KUBECONFORM_VERSION: v0.8.0
@@ -56,9 +53,7 @@ jobs:
           tar -xzf kubeconform.tar.gz kubeconform
           sudo mv kubeconform /usr/local/bin/kubeconform
       - name: kubeconform
-        # Rendered manifests against the Kubernetes API schemas, for the dev
-        # values and for each tag that adds CRDs or a whole subchart. CRD
-        # schemas (ServiceMonitor) come from the datree catalog.
+        # Dev values plus each tag that adds CRDs or a subchart; CRD schemas from datree.
         env:
           KUBERNETES_VERSION: "1.36.1"
         run: |
@@ -76,6 +71,13 @@ jobs:
     name: Install · test-dependencies on kind
     needs: lint
     runs-on: ubuntu-latest
+    env:
+      CHART_ARGS: >-
+        -n naira-deps
+        -f charts/test-dependencies/values-dev.yaml
+        --set mcpMock.image.registry=
+        --set mcpMock.image.repository=mcp-mock
+        --set mcpMock.image.tag=ci
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -85,31 +87,46 @@ jobs:
           version: v4.3.0
       - uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
       - name: Register chart repositories
-        # Helm 4 does not fetch from an unregistered HTTP repository; the OCI
-        # one (litellm) needs no registration.
+        # Helm 4 needs HTTP repos registered; OCI (litellm) does not.
         run: |
           helm repo add community-charts https://community-charts.github.io/helm-charts
           helm repo add open-metadata https://helm.open-metadata.org
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
       - run: helm dependency build charts/test-dependencies
       - name: Build and load mcp-mock
-        # Its published image only exists after a merge to main; the PR tests
-        # the source it contains.
+        # Published only after merge; the PR tests its own source.
         run: |
           docker build -t mcp-mock:ci images/mcp-mock
           kind load docker-image mcp-mock:ci --name chart-testing
+      - name: PostgreSQL for LiteLLM
+        # Stand-in for the naira chart's server and its litellm database (same chart, Service and namespace).
+        run: |
+          helm install postgres oci://registry-1.docker.io/cloudpirates/postgres --version 0.21.2 \
+            -n idp-system --create-namespace --set fullnameOverride=postgres --set auth.password=ci-admin \
+            --set customUser.name=litellm --set customUser.database=litellm \
+            --set "customUser.password=$(yq '.secrets.litellmDatabase.password' charts/test-dependencies/values-dev.yaml)"
+          kubectl -n idp-system rollout status statefulset/postgres --timeout=5m
       - name: Install
         run: |
-          # No --wait: the migrations Job is garbage-collected after 120s and
-          # Helm then fails on a healthy release.
-          helm install test-dependencies charts/test-dependencies \
-            -n naira-deps --create-namespace \
-            -f charts/test-dependencies/values-dev.yaml \
-            --set mcpMock.image.registry="" \
-            --set mcpMock.image.repository=mcp-mock \
-            --set mcpMock.image.tag=ci
-          kubectl -n naira-deps wait --for=condition=Available deployment --all --timeout=12m
-          kubectl -n naira-deps wait --for=jsonpath='{.status.readyReplicas}'=1 statefulset --all --timeout=12m
+          # kubectl, not --wait: LiteLLM's first migration outlasts it.
+          # rollout status, not condition=Available: llama.cpp (maxUnavailable 1) is Available before any pod is Ready.
+          # shellcheck disable=SC2086
+          helm install test-dependencies charts/test-dependencies --create-namespace ${CHART_ARGS}
+          for d in $(kubectl -n naira-deps get deployment -o name); do kubectl -n naira-deps rollout status "$d" --timeout=12m; done
+          kubectl -n naira-deps wait --for=condition=complete job --all --timeout=10m
+      - name: Upgrade
+        # Unchanged upgrade keeps the Jobs; a changed seed spec replaces them.
+        run: |
+          uids() { kubectl -n naira-deps get jobs -o jsonpath='{range .items[*]}{.metadata.uid}{"\n"}{end}' | sort; }
+          before=$(uids)
+          # shellcheck disable=SC2086
+          helm upgrade test-dependencies charts/test-dependencies ${CHART_ARGS}
+          [ "$(uids)" = "$before" ] || { echo "::error::an unchanged upgrade replaced a Job"; exit 1; }
+          # shellcheck disable=SC2086
+          helm upgrade test-dependencies charts/test-dependencies ${CHART_ARGS} --set seed.backoffLimit=11
+          [ "$(uids)" != "$before" ] || { echo "::error::a changed seed spec kept the old Job"; exit 1; }
+          for d in $(kubectl -n naira-deps get deployment -o name); do kubectl -n naira-deps rollout status "$d" --timeout=12m; done
+          kubectl -n naira-deps wait --for=condition=complete job --all --timeout=10m
       - name: Show state
         if: always()
         run: kubectl -n naira-deps get pods,jobs -o wide

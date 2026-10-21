@@ -24,9 +24,22 @@ spec:
       containers:
         - name: mcp-mock
           image: {{ $img | quote }}
+          env:
+            - {name: PORT, value: {{ .Values.mcpMock.port | quote }}}
           ports:
             - {containerPort: {{ .Values.mcpMock.port }}, name: http}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
           resources: {{- toYaml .Values.mcpMock.resources | nindent 12 }}
+          securityContext:
+            {{- include "deps.securityContext" . | nindent 12 }}
+            # distroless nonroot; the image names its user, so give the uid
+            runAsUser: 65532
+            readOnlyRootFilesystem: true
 ---
 apiVersion: v1
 kind: Service

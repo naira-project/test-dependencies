@@ -1,15 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Naira Project Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-# mcp-mock is a test double for the catalog's mcp-servers plugin. Dev only,
-# never part of a Naira release. Built for linux/amd64 and linux/arm64 by the
-# shared workflows, published on main as <chart appVersion>, sha-<commit>,
-# main and latest; the chart's default tag is the appVersion.
-#
-# A published appVersion tag is never overwritten: changing images/mcp-mock
-# requires bumping `appVersion` in charts/test-dependencies/Chart.yaml. A new
-# appVersion with no image change publishes the current source under it, so
-# the chart never points at a tag that was not built.
+# mcp-mock (dev only), amd64+arm64, published on main as the chart's appVersion.
+# A published appVersion is never overwritten: image changes need an appVersion bump.
 name: mcp-mock image
 
 on:
@@ -64,21 +57,27 @@ jobs:
         run: |
           APP_VERSION=$(yq '.appVersion' charts/test-dependencies/Chart.yaml)
           echo "app-version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
-          if [ -z "${BASE}" ] || [ "${BASE}" = "0000000000000000000000000000000000000000" ] \
+          if [ -z "${BASE}" ]; then
+            changed=false   # workflow_dispatch: build only if the tag is missing
+          elif [ "${BASE}" = "0000000000000000000000000000000000000000" ] \
             || ! git diff --quiet "${BASE}" HEAD -- images/mcp-mock; then
             changed=true
           else
             changed=false
           fi
-          if docker manifest inspect "${IMAGE}:${APP_VERSION}" >/dev/null 2>&1; then
+          # Only "manifest unknown" means unpublished; any other error fails rather than overwrite.
+          if out=$(docker manifest inspect "${IMAGE}:${APP_VERSION}" 2>&1); then
             if [ "${changed}" = true ]; then
               echo "::error::${IMAGE}:${APP_VERSION} already exists; bump appVersion in charts/test-dependencies/Chart.yaml"
               exit 1
             fi
-            echo "::notice::${IMAGE}:${APP_VERSION} already published and images/mcp-mock is unchanged; nothing to build"
+            echo "::notice::${IMAGE}:${APP_VERSION} already published; nothing to build"
             echo "build=false" >> "$GITHUB_OUTPUT"
-          else
+          elif grep -qiE 'manifest unknown|no such manifest' <<< "${out}"; then
             echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::cannot tell whether ${IMAGE}:${APP_VERSION} exists: ${out}"
+            exit 1
           fi
 
   build:
@@ -96,7 +95,7 @@ jobs:
   publish:
     name: Build and push
     needs: version
-    if: github.event_name != 'pull_request' && needs.version.outputs.build == 'true'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.version.outputs.build == 'true'
     permissions:
       contents: read
       packages: write

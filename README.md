@@ -3,7 +3,7 @@
 ## About this project
 
 The third-party tier Naira talks to but does not ship (RFC-009 §1): Keycloak,
-LiteLLM with its PostgreSQL, MLflow, OpenMetadata, llama.cpp, vLLM,
+LiteLLM, MLflow, OpenMetadata, llama.cpp, vLLM,
 kube-prometheus-stack and `mcp-mock`, packaged as one Helm chart. It is
 versioned independently of Naira, because these components move on upstream
 release cycles, not on Naira's.
@@ -28,12 +28,12 @@ none of this needs; `values-dev.yaml` adds what a local Naira needs.
 | Tag | Installs | `values.yaml` | `values-dev.yaml` |
 |---|---|---|---|
 | `keycloak` | Keycloak with realm `naira` (`files/naira-realm.json`) | on | on |
-| `litellm` | LiteLLM and its PostgreSQL | on | on |
+| `litellm` | LiteLLM; its database is on Naira's PostgreSQL | on | on |
 | `mlflow` | MLflow, SQLite on PVC `mlflow-data` | on | on |
 | `mcpMock` | `mcp-mock` | off | on |
 | `llamacpp` | llama.cpp, one Deployment per model | off | on |
 | `vllm` | vLLM (exclusive with `llamacpp`) | off | off |
-| `openmetadata` | OpenMetadata with MySQL and OpenSearch | off | off |
+| `openmetadata` | OpenMetadata with OpenSearch; its database is on Naira's PostgreSQL | off | off |
 | `monitoring` | kube-prometheus-stack and the ServiceMonitors | off | off |
 
 ## Requirements and Setup
@@ -64,33 +64,44 @@ about 4 CPUs and 8 GiB.
    docker build -t "$IMG" images/mcp-mock && kind load docker-image "$IMG"
    ```
 
-3. Install this chart into `naira-deps`, then wait for it. Not with Helm's
-   `--wait`: the LiteLLM migrations Job is garbage-collected after 120 s and
-   Helm then fails on a healthy release.
-
-   ```sh
-   helm upgrade --install test-dependencies charts/test-dependencies \
-     -n naira-deps --create-namespace \
-     -f charts/test-dependencies/values-dev.yaml
-   kubectl -n naira-deps wait --for=condition=Available deployment --all --timeout=12m
-   kubectl -n naira-deps wait --for=jsonpath='{.status.readyReplicas}'=1 statefulset --all --timeout=12m
-   ```
-
-4. Install the released naira chart into `idp-system`, the only namespace
-   its UI works in for now. Its defaults already address this chart in
-   `naira-deps`; only the development Secrets are set. The OpenMetadata plugin
-   is off because `values-dev.yaml` leaves OpenMetadata off.
+3. Install the naira chart into `idp-system`, the only namespace its UI works
+   in for now. It runs the PostgreSQL server that LiteLLM uses, and its
+   `db-init` Job creates the `litellm` and `openmetadata` databases. Its defaults already address
+   this chart in `naira-deps`; only the development Secrets are set. The
+   OpenMetadata plugin is off because `values-dev.yaml` leaves OpenMetadata
+   off. Needs a naira release that ships PostgreSQL.
 
    ```sh
    helm upgrade --install naira oci://ghcr.io/naira-project/charts/naira \
-     --version 0.1.1 -n idp-system --create-namespace \
+     --version <release> -n idp-system --create-namespace \
      --set catalog.secret.create=true \
      --set catalog.secret.data.LITELLM_API_KEY=sk-local-litellm \
      --set catalog.secret.data.OPENMETADATA_ADMIN_PASSWORD=admin \
      --set catalog.plugins.openmetadata.enabled=false \
      --set portal.oidc.secret.create=true \
      --set portal.oidc.secret.value=naira-local-dev-secret \
+     --set database.admin.secret.create=true \
+     --set database.admin.secret.password=postgres-local-admin-password \
+     --set database.databases.catalog.secret.create=true \
+     --set database.databases.catalog.secret.password=catalog-local-password \
+     --set database.databases.litellm.enabled=true \
+     --set database.databases.litellm.secret.create=true \
+     --set database.databases.litellm.secret.password=litellm-local-password \
+     --set database.databases.openmetadata.enabled=true \
+     --set database.databases.openmetadata.secret.create=true \
+     --set database.databases.openmetadata.secret.password=openmetadata-local-password \
      --wait --timeout 10m
+   ```
+
+4. Install this chart into `naira-deps`, then wait for it. LiteLLM migrates
+   its database on first start, which can take several minutes, so the wait
+   is `kubectl wait` with a long timeout rather than Helm's `--wait`.
+
+   ```sh
+   helm upgrade --install test-dependencies charts/test-dependencies \
+     -n naira-deps --create-namespace \
+     -f charts/test-dependencies/values-dev.yaml
+   kubectl -n naira-deps wait --for=condition=Available deployment --all --timeout=12m
    ```
 
 5. Reach it from the browser. The issuer is `http://localhost:8080`, so
@@ -111,7 +122,8 @@ the commands above is a local development placeholder.
 
 Keep `values.yaml`'s default of operator-supplied Secrets (the
 `secrets.*.create: false` keys document each name and key) and set
-`keycloak.hostname` to the address browsers use. Released charts:
+`keycloak.hostname` to the address browsers use. Replace the development
+realm with `keycloak.realmImport.existingConfigMap`. Released charts:
 
 ```sh
 helm install test-dependencies oci://ghcr.io/naira-project/charts/test-dependencies \
