@@ -4,7 +4,3 @@
 # Chart and images: maintainers.
 /charts/** @naira-project/maintainer
 /images/** @naira-project/maintainer
-
-# Platform infrastructure — requires Platform Engineering review.
-# Developers cannot merge changes here without platform team approval.
-/infrastructure/platform/** @naira-project/auto
