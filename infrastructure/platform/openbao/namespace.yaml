@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: naira-platform-openbao
-  labels:
-    app.kubernetes.io/part-of: naira-platform
-    app.kubernetes.io/component: openbao
