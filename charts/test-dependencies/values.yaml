@@ -6,6 +6,7 @@ tags:
   litellm: true          # database on Naira's PostgreSQL
   mlflow: true
   mcpMock: false          # test double; on in values-dev.yaml
+  langfuse: false        # Langfuse, its three bundled stores and ClickHouse
   openmetadata: false
   monitoring: false      # kube-prometheus-stack and the ServiceMonitors
   llamacpp: false
@@ -63,6 +64,20 @@ secrets:
     create: false
     accessKey: ""
     secretKey: ""
+  # Secret `langfuse-app-credentials`, read through the secretKeyRefs in the
+  # langfuse block below. The subchart would otherwise generate all three with
+  # `randAlphaNum`, re-rolled on every render — and a rotated SALT or
+  # ENCRYPTION_KEY orphans every row written under the old one.
+  langfuseApp:
+    create: false
+    salt: ""            # `openssl rand -base64 32`
+    encryptionKey: ""   # 64 hex chars — `openssl rand -hex 32`
+    nextauthSecret: ""  # `openssl rand -base64 32`
+  # Secret `clickhouse-auth` (key password), read by both ends: the ClickHouse
+  # StatefulSet this chart renders and the Langfuse pods that connect to it.
+  clickhouseAuth:
+    create: false
+    password: ""
 # ── on by default ─────────────────────────────────────────────────────────────
 
 keycloak:
@@ -194,6 +209,216 @@ seed:
     limits: {cpu: 500m, memory: 512Mi}
 
 # ── off by default ────────────────────────────────────────────────────────────
+
+# ClickHouse, for Langfuse. Rendered here (templates/clickhouse.yaml) and not
+# by the langfuse subchart, whose ClickHouse is a pair of operator CRs — that
+# would make the ClickHouse operator and cert-manager prerequisites of this
+# chart. Rides tags.langfuse; deploy: false points Langfuse at a ClickHouse that
+# already runs (langfuse.clickhouse.host below must name it).
+clickhouse:
+  deploy: true
+  # What Langfuse recommends for 4.x, the version its operator CRs pin too.
+  # Moves with the subchart.
+  image: clickhouse/clickhouse-server:26.4
+  # Fixed in the image (`useradd --uid=101`), deliberately, so that volume
+  # ownership can be arranged from outside. Must match it; not a knob.
+  uid: 101
+  # Kept equal to langfuse.clickhouse.auth.username and .database by hand —
+  # Helm cannot template subchart values. validate.yaml rejects a drifted pair.
+  user: default
+  database: default
+  storage: 10Gi
+  # Empty means the cluster's default class. Each of langfuse's four volumes
+  # takes its own, under the key its subchart happens to call it.
+  storageClass: ""
+  resources:
+    requests: {cpu: 500m, memory: 1Gi}
+    limits: {memory: 2Gi}
+
+# Langfuse — LLM observability, the tier's counterpart to LiteLLM's gateway.
+# PostgreSQL, Valkey and SeaweedFS ride along as subcharts; ClickHouse is this
+# chart's own, above. Off by default for its size: six workloads, four of them
+# on persistent volumes.
+langfuse:
+  # The web UI is langfuse-web.<namespace>.svc:3000.
+  fullnameOverride: langfuse
+  langfuse:
+    # The three credentials Langfuse cannot regenerate (secrets.langfuseApp).
+    # Always by reference, whether or not this chart creates that Secret:
+    # pointing at it is what stops the subchart generating them.
+    salt:
+      secretKeyRef: {name: langfuse-app-credentials, key: salt}
+    encryptionKey:
+      secretKeyRef: {name: langfuse-app-credentials, key: encryption-key}
+    nextauth:
+      # Browser-facing, same rule as keycloak.hostname: port-forwarded wherever
+      # a laptop reaches it.
+      url: http://localhost:3002
+      secret:
+        secretKeyRef: {name: langfuse-app-credentials, key: nextauth-secret}
+    features:
+      # A test tier does not report usage to langfuse.com.
+      telemetryEnabled: false
+    image:
+      # The tag is already pinned to appVersion
+      pullPolicy: IfNotPresent
+    # Names the bundled Service literally: a subchart value cannot be
+    # templated, and the container is given no env to read the host from. So
+    # with postgresql.deploy: false this has to be retargeted at
+    # postgresql.host or emptied — templates/validate.yaml refuses the render
+    # otherwise, because the pods would wait here forever on a name that no
+    # longer resolves.
+    extraInitContainers:
+      - name: wait-for-postgresql
+        image: postgres:18
+        command: ["sh", "-c", "until pg_isready -h langfuse-postgresql -p 5432; do sleep 2; done"]
+        resources:
+          requests: {cpu: 10m, memory: 32Mi}
+          limits: {memory: 64Mi}
+    web:
+      livenessProbe:
+        failureThreshold: 30
+      resources:
+        requests: {cpu: 200m, memory: 1Gi}
+        limits: {memory: 2Gi}
+    worker:
+      livenessProbe:
+        # The worker does not exit, it answers 500 while it waits on web's
+        # ClickHouse migrations — long enough for upstream's threshold to kill
+        # it. Measured: one restart before this, none after.
+        failureThreshold: 30
+      resources:
+        requests: {cpu: 200m, memory: 768Mi}   # measured ~565Mi idle
+        limits: {memory: 2Gi}
+  # Langfuse's own PostgreSQL, separate from litellm's. fullnameOverride is not
+  # cosmetic: both subcharts default to <release>-postgresql, so with both tags
+  # on the StatefulSets and Services collide and the install is rejected. The
+  # other two stores are renamed for symmetry; langfuse resolves its hostnames
+  # through these same keys.
+  postgresql:
+    # true renders the bundled server below; false renders none of it and
+    # points Langfuse at a server that already exists — managed, or one this
+    # tier shares. The keys down to `auth` are that switch.
+    deploy: true
+    host: ""                # required when deploy: false, i.e. when we want to connect it to already hosted postgresql (validate.yaml)
+    port: null              # 5432 unless set
+    # For a connection through a pooler: migrations need to reach the server
+    # directly, and a user without CREATE DATABASE needs a shadow database.
+    directUrl: ""
+    shadowDatabaseUrl: ""
+    fullnameOverride: langfuse-postgresql
+    auth:
+      # Which database and role Langfuse uses — created by the subchart when
+      # deploy is true, selected on the server when it is false.
+      database: langfuse
+      username: langfuse
+      # A bundled store's password, generated with `randAlphaNum` when left
+      # empty — kept by `lookup` on a live upgrade, but re-rolled by any render
+      # that cannot read the cluster, which is every Argo CD diff. Set per
+      # environment; templates/validate.yaml rejects the empty value while the
+      # store is ours. Not held in a Secret of this chart's making: langfuse
+      # bootstraps its subcharts from Secrets it writes itself, so
+      # `existingSecret` here would mean rebuilding them.
+      password: ""
+      # The other half of deploy: false — the operator's Secret holding the
+      # password of the server Langfuse connects to. Ignored, and left empty,
+      # while the bundled server is the one in use.
+      existingSecret: ""
+      secretKeys:
+        userPasswordKey: password
+    storage:
+      requestedSize: 5Gi
+      className: ""         # empty: cluster's default class (kind: standard, EKS: gp3, io1/io1, efs-sc)
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {memory: 512Mi}
+  redis:
+    # Valkey, bundled — Langfuse's queue, not a cache. deploy: false points it
+    # at a Redis or Valkey that already runs, and is also what the subchart's
+    # cluster and sentinel modes require; the bundled node is a single one.
+    deploy: true
+    host: ""                # required when deploy: false (validate.yaml)
+    port: 6379
+    fullnameOverride: langfuse-valkey
+    tls:
+      # For a managed instance that wants TLS. caPath, certPath and keyPath
+      # are there too, pointing at files mounted into the langfuse pods.
+      enabled: false
+    auth:
+      username: default
+      database: 0
+      # Generated with `randAlphaNum` when left empty, like the other bundled
+      # stores — re-rolled by any render that cannot read the cluster.
+      # templates/validate.yaml rejects the empty value while the store is
+      # ours.
+      password: ""
+      # The deploy: false half, as for PostgreSQL above.
+      existingSecret: ""
+      existingSecretPasswordKey: ""
+    # Not restated here, but worth knowing before tuning memory: upstream puts
+    # `maxmemory-policy noeviction` in valkeyConfig and rejects anything else.
+    # Langfuse's job queue lives in this store, so eviction loses work.
+    dataStorage:
+      requestedSize: 2Gi
+      className: ""         # empty: cluster's default class (kind: standard, EKS: gp3, io1/io1, efs-sc)
+    resources:
+      requests: {cpu: 50m, memory: 128Mi}
+      limits: {memory: 256Mi}
+  s3:
+    # true renders the bundled SeaweedFS below, an S3 gateway for a cluster
+    # with no object storage of its own; false renders none of it and points
+    # Langfuse at an external S3. Nothing in this block is required, because
+    # what a given environment needs differs: against AWS the endpoint stays
+    # empty so the SDK resolves it from the region, path style goes off for
+    # virtual-hosted buckets, and the credentials below stay empty too —
+    # an IRSA role on langfuse.serviceAccount beats long-lived keys. An
+    # S3-compatible server (MinIO, Ceph) is the opposite: a named endpoint,
+    # path style on, and keys by reference.
+    deploy: true
+    storageProvider: s3     # or azure, gcs
+    bucket: langfuse
+    region: auto
+    endpoint: ""            # empty on AWS; the server's URL otherwise
+    forcePathStyle: true    # false for AWS
+    # By reference, never by value. `value:` exists upstream and is the reason
+    # to say so: a key written here lands in the rendered Deployment.
+    accessKeyId:
+      secretKeyRef: {name: "", key: ""}
+    secretAccessKey:
+      secretKeyRef: {name: "", key: ""}
+    # eventUpload, batchExport and mediaUpload each override all of the above
+    # when one of them needs a bucket of its own.
+    fullnameOverride: langfuse-s3
+    auth:
+      rootPassword: ""
+    # Not pinnable, unlike the passwords above: seaweedfs renders an SFTP Secret
+    # whenever allInOne is on (sftp.enabled stays false, no SFTP pod is ever
+    # created) and generates its three passwords with no values hook to supply
+    # them. So `langfuse-s3-sftp-secret` is the one object in a langfuse render
+    # that changes every time — an auto-synced Application will rewrite
+    # credentials that nothing reads. tests/render-test.sh holds it to that one.
+    allInOne:
+      data:
+        size: 5Gi
+        # seaweedfs calls it storageClass, not className.
+        storageClass: ""    # empty: cluster's default class (kind: standard, EKS: gp3, io1/io1, efs-sc)
+      resources:
+        requests: {cpu: 100m, memory: 256Mi}
+        limits: {cpu: 1, memory: 1Gi}
+  clickhouse:
+    # Off: the subchart's ClickHouse is a pair of operator CRs. The server in
+    # templates/clickhouse.yaml answers on this Service instead, reading the
+    # same Secret — the one store whose credential this chart owns both ends of.
+    deploy: false
+    host: clickhouse
+    auth:
+      existingSecret: clickhouse-auth
+      existingSecretKey: password
+    cluster:
+      # No ON CLUSTER DDL: one server, no Keeper. Langfuse migrates with plain
+      # statements when this is off.
+      enabled: false
+
 
 # Airflow off: the plugin only reads the REST API, and it needs ReadWriteMany.
 # MySQL off: OpenMetadata uses its own database on Naira's PostgreSQL.

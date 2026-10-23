@@ -1,0 +1,101 @@
+{{/*
+ClickHouse — where Langfuse keeps traces, and the one store its chart does not
+bring along: chart 2.x builds ClickHouse out of ClickHouseCluster and
+KeeperCluster CRs, so taking it would make the ClickHouse operator and the
+cert-manager its webhooks need prerequisites of this chart.
+
+A single server is all this tier wants, and that is exactly what the operator
+adds nothing to: no replication, no Keeper quorum, no ON CLUSTER DDL. The langfuse block in
+values.yaml aims the subchart at this Service with its own ClickHouse off.
+
+Rides tags.langfuse rather than a tag of its own — a ClickHouse with no
+Langfuse in front of it is an empty server.
+*/}}
+{{- if and .Values.tags.langfuse .Values.clickhouse.deploy }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "deps.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {app: clickhouse}
+  ports:
+    - {name: http, port: 8123, targetPort: http}
+    - {name: native, port: 9000, targetPort: native}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: clickhouse
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "deps.labels" . | nindent 4 }}
+spec:
+  serviceName: clickhouse
+  replicas: 1
+  selector:
+    matchLabels: {app: clickhouse}
+  template:
+    metadata:
+      labels:
+        app: clickhouse
+        {{- include "deps.labels" . | nindent 8 }}
+    spec:
+      securityContext:
+        # The image is world-writable under /var/lib, /var/log and /etc so it
+        # can run as any uid — the entrypoint rewrites users.d on every start.
+        # What it will not do unprivileged is chown the volume, so fsGroup has
+        # to hand the PVC over: a CSI-provisioned one is root-owned, the trap
+        # llamacpp's downloader falls into without it.
+        runAsUser: {{ .Values.clickhouse.uid }}
+        runAsGroup: {{ .Values.clickhouse.uid }}
+        fsGroup: {{ .Values.clickhouse.uid }}
+      containers:
+        - name: clickhouse
+          image: {{ .Values.clickhouse.image | quote }}
+          env:
+            # With a password set, the entrypoint rewrites `default` reachable
+            # from the pod network. Without one the server answers on localhost
+            # only and the Langfuse pods never connect.
+            - name: CLICKHOUSE_USER
+              value: {{ .Values.clickhouse.user | quote }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom: {secretKeyRef: {name: clickhouse-auth, key: password}}
+            - name: CLICKHOUSE_DB
+              value: {{ .Values.clickhouse.database | quote }}
+          ports:
+            - {containerPort: 8123, name: http}
+            - {containerPort: 9000, name: native}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/clickhouse}
+          readinessProbe:
+            httpGet: {path: /ping, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            httpGet: {path: /ping, port: http}
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 10
+          resources: {{- toYaml .Values.clickhouse.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels: {{- include "deps.labels" . | nindent 10 }}
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- /*
+        Omitted when empty, never written as "". The empty string is not
+        "whatever the cluster defaults to" — it turns dynamic provisioning off
+        and binds only to a PV that carries no class, so the claim would sit
+        Pending on a cluster whose default class would have served it.
+        */}}
+        {{- with .Values.clickhouse.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.clickhouse.storage }}
+{{- end }}

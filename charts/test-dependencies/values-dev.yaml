@@ -5,6 +5,7 @@ tags:
   litellm: true
   mlflow: true
   mcpMock: true
+  langfuse: false
   openmetadata: false
   monitoring: false
   llamacpp: true
@@ -39,6 +40,15 @@ secrets:
   openmetadataDatabase:
     create: true
     password: openmetadata-local-password
+  langfuseApp:
+    create: true
+    salt: langfuse-local-dev-salt
+    # 64 hex chars, as Langfuse requires of ENCRYPTION_KEY.
+    encryptionKey: "0000000000000000000000000000000000000000000000000000000000000000"
+    nextauthSecret: langfuse-local-dev-nextauth
+  clickhouseAuth:
+    create: true
+    password: clickhouse-local-dev
 
 litellm:
   # Sample catalog content for the litellm plugins. Replaces values.yaml's list.
@@ -93,6 +103,36 @@ litellm:
         description: Mock MCP server for local development
 
 mlflow:
+  flaskServerSecretKey: local-dev-flask-key   # fixed: generated otherwise on every render
+
+# Both render only with tags.langfuse: the passwords validate.yaml requires,
+# and volumes a kind node can actually provision.
+clickhouse:
+  storage: 2Gi
+  resources:
+    # 1Gi, not the 512Mi this asked for first: measured at ~1.2Gi idle on kind,
+    # before a single trace is written. An understated request is one the
+    # scheduler believes, and then something else on the node pays for it.
+    requests: {cpu: 200m, memory: 1Gi}
+    limits: {memory: 2Gi}
+
+langfuse:
+  postgresql:
+    auth:
+      password: langfuse-local-postgres
+    storage:
+      requestedSize: 2Gi
+  redis:
+    auth:
+      password: langfuse-local-valkey
+    dataStorage:
+      requestedSize: 1Gi
+  s3:
+    auth:
+      rootPassword: langfuse-local-s3
+    allInOne:
+      data:
+        size: 2Gi
   flaskServerSecretKey: local-dev-flask-key   # fixed: generated otherwise on every render
 
 seed:
