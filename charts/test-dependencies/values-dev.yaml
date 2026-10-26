@@ -40,6 +40,11 @@ secrets:
   openmetadataDatabase:
     create: true
     password: openmetadata-local-password
+  # Equals the naira chart's values-dev.yaml database.databases.langfuse
+  # password.
+  langfuseDatabase:
+    create: true
+    password: langfuse-local-password
   langfuseApp:
     create: true
     salt: langfuse-local-dev-salt
@@ -117,11 +122,8 @@ clickhouse:
     limits: {memory: 2Gi}
 
 langfuse:
-  postgresql:
-    auth:
-      password: langfuse-local-postgres
-    storage:
-      requestedSize: 2Gi
+  # No postgresql block: Langfuse uses its database on Naira's server, like
+  # litellm. Install naira first.
   redis:
     auth:
       password: langfuse-local-valkey
@@ -133,7 +135,6 @@ langfuse:
     allInOne:
       data:
         size: 2Gi
-  flaskServerSecretKey: local-dev-flask-key   # fixed: generated otherwise on every render
 
 seed:
   mlflow:

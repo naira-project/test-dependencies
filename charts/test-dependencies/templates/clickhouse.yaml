@@ -51,6 +51,8 @@ spec:
         runAsUser: {{ .Values.clickhouse.uid }}
         runAsGroup: {{ .Values.clickhouse.uid }}
         fsGroup: {{ .Values.clickhouse.uid }}
+      # A database gets longer than the 30s default to flush and close.
+      terminationGracePeriodSeconds: 120
       containers:
         - name: clickhouse
           image: {{ .Values.clickhouse.image | quote }}
@@ -64,26 +66,35 @@ spec:
               valueFrom: {secretKeyRef: {name: clickhouse-auth, key: password}}
             - name: CLICKHOUSE_DB
               value: {{ .Values.clickhouse.database | quote }}
+          # readOnlyRootFilesystem is not in the helper on purpose: the
+          # entrypoint rewrites /etc/clickhouse-server/users.d on every start.
+          securityContext: {{- include "deps.securityContext" . | nindent 12 }}
           ports:
             - {containerPort: 8123, name: http}
             - {containerPort: 9000, name: native}
           volumeMounts:
             - {name: data, mountPath: /var/lib/clickhouse}
+          # Startup can be slow while the server replays its log. The other two
+          # probes do not run until this passes, so they stay tight.
+          startupProbe:
+            httpGet: {path: /ping, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
           readinessProbe:
             httpGet: {path: /ping, port: http}
-            initialDelaySeconds: 10
             periodSeconds: 10
-            failureThreshold: 12
+            failureThreshold: 3
           livenessProbe:
             httpGet: {path: /ping, port: http}
-            initialDelaySeconds: 60
             periodSeconds: 20
-            failureThreshold: 10
+            failureThreshold: 5
           resources: {{- toYaml .Values.clickhouse.resources | nindent 12 }}
   volumeClaimTemplates:
     - metadata:
         name: data
-        labels: {{- include "deps.labels" . | nindent 10 }}
+        # stableLabels: this block is immutable, and deps.labels would carry
+        # the chart version into it — a version bump then fails the upgrade.
+        labels: {{- include "deps.stableLabels" . | nindent 10 }}
       spec:
         accessModes: [ReadWriteOnce]
         {{- /*

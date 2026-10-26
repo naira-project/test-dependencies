@@ -73,6 +73,16 @@ secrets:
     salt: ""            # `openssl rand -base64 32`
     encryptionKey: ""   # 64 hex chars — `openssl rand -hex 32`
     nextauthSecret: ""  # `openssl rand -base64 32`
+  # Secret `langfuse-db`, for Langfuse's database on Naira's PostgreSQL — the
+  # same arrangement as litellmDatabase above. The password must equal the one
+  # the naira chart sets for database.databases.langfuse; nothing can check
+  # that across two repositories, so change both or neither. `username` is
+  # carried for symmetry with litellm-db: langfuse reads only `password` from
+  # here and takes the role name from langfuse.postgresql.auth.username.
+  langfuseDatabase:
+    create: false
+    username: langfuse
+    password: ""
   # Secret `clickhouse-auth` (key password), read by both ends: the ClickHouse
   # StatefulSet this chart renders and the Langfuse pods that connect to it.
   clickhouseAuth:
@@ -218,8 +228,10 @@ seed:
 clickhouse:
   deploy: true
   # What Langfuse recommends for 4.x, the version its operator CRs pin too.
-  # Moves with the subchart.
-  image: clickhouse/clickhouse-server:26.4
+  # Digest-pinned: 26.4 is a moving tag. The tag stays for readability; the
+  # digest is the index, so amd64 and arm64 both still resolve. Moves with the
+  # subchart — re-resolve the digest when the tag changes.
+  image: clickhouse/clickhouse-server:26.4@sha256:c7796a1335d14385c052f10061cf719f4a368a908432ec25980860b1333e9ccd
   # Fixed in the image (`useradd --uid=101`), deliberately, so that volume
   # ownership can be arranged from outside. Must match it; not a knob.
   uid: 101
@@ -270,8 +282,12 @@ langfuse:
     # longer resolves.
     extraInitContainers:
       - name: wait-for-postgresql
-        image: postgres:18
-        command: ["sh", "-c", "until pg_isready -h langfuse-postgresql -p 5432; do sleep 2; done"]
+        # Digest-pinned like the ClickHouse image above; 18 is a moving tag.
+        image: postgres:18@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6
+        # Naira's server, matching postgresql.host. Needed more here than with
+        # the bundled one: litellm retries until naira is up, langfuse-web
+        # exits 1 on P1001 and crashloops instead.
+        command: ["sh", "-c", "until pg_isready -h postgres.idp-system.svc.cluster.local -p 5432; do sleep 2; done"]
         resources:
           requests: {cpu: 10m, memory: 32Mi}
           limits: {memory: 64Mi}
@@ -296,36 +312,36 @@ langfuse:
   # other two stores are renamed for symmetry; langfuse resolves its hostnames
   # through these same keys.
   postgresql:
-    # true renders the bundled server below; false renders none of it and
-    # points Langfuse at a server that already exists — managed, or one this
-    # tier shares. The keys down to `auth` are that switch.
-    deploy: true
-    host: ""                # required when deploy: false, i.e. when we want to connect it to already hosted postgresql (validate.yaml)
-    port: null              # 5432 unless set
+    # Own database on Naira's PostgreSQL, created by the naira chart's db-init
+    # Job (database.databases.langfuse) — the same server litellm.db points at.
+    # Install naira first. deploy: true instead renders the bundled server for
+    # a tier running without Naira, and the keys below it are then the ones in
+    # use. host is required whenever deploy is false (validate.yaml).
+    deploy: false
+    host: postgres.idp-system.svc.cluster.local
+    port: 5432
     # For a connection through a pooler: migrations need to reach the server
     # directly, and a user without CREATE DATABASE needs a shadow database.
     directUrl: ""
     shadowDatabaseUrl: ""
     fullnameOverride: langfuse-postgresql
     auth:
-      # Which database and role Langfuse uses — created by the subchart when
-      # deploy is true, selected on the server when it is false.
+      # Which database and role Langfuse uses — selected on Naira's server, or
+      # created by the subchart when deploy is true.
       database: langfuse
       username: langfuse
-      # A bundled store's password, generated with `randAlphaNum` when left
-      # empty — kept by `lookup` on a live upgrade, but re-rolled by any render
-      # that cannot read the cluster, which is every Argo CD diff. Set per
-      # environment; templates/validate.yaml rejects the empty value while the
-      # store is ours. Not held in a Secret of this chart's making: langfuse
-      # bootstraps its subcharts from Secrets it writes itself, so
-      # `existingSecret` here would mean rebuilding them.
+      # Only read when deploy is true: a bundled store's password, generated
+      # with `randAlphaNum` when left empty and re-rolled by any render that
+      # cannot read the cluster. templates/validate.yaml rejects the empty
+      # value while the store is ours.
       password: ""
-      # The other half of deploy: false — the operator's Secret holding the
-      # password of the server Langfuse connects to. Ignored, and left empty,
-      # while the bundled server is the one in use.
-      existingSecret: ""
+      # Secret `langfuse-db`, rendered by this chart from
+      # secrets.langfuseDatabase. Only its `password` key is read — the role
+      # name comes from auth.username above, not from the Secret.
+      existingSecret: langfuse-db
       secretKeys:
         userPasswordKey: password
+    # Both only read when deploy is true.
     storage:
       requestedSize: 5Gi
       className: ""         # empty: cluster's default class (kind: standard, EKS: gp3, io1/io1, efs-sc)
