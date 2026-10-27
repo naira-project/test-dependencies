@@ -18,3 +18,80 @@
 {{- if and .Values.tags.openmetadata (index .Values "openmetadata-dependencies" "mysql" "enabled") }}
 {{- fail "openmetadata-dependencies.mysql.enabled must be false: OpenMetadata uses Naira's PostgreSQL (openmetadata.openmetadata.config.database)" }}
 {{- end }}
+
+{{- /*
+Langfuse's bundled stores. An empty password is generated with `randAlphaNum`
+and re-rolls on every render, so an auto-synced Application rewrites the Secret
+forever while the store keeps what it was bootstrapped with. Required, like
+litellm's — but only for a store this release actually deploys. Pointed at
+something that already exists, the password belongs to that server and is
+supplied the way it documents. ClickHouse is absent from the list entirely:
+its password lives in clickhouse-auth, which both ends read.
+*/}}
+{{- if .Values.tags.langfuse }}
+{{- range $store := list
+      (dict "deploy" $.Values.langfuse.postgresql.deploy "path" "postgresql.auth.password" "value" $.Values.langfuse.postgresql.auth.password)
+      (dict "deploy" $.Values.langfuse.redis.deploy      "path" "redis.auth.password"      "value" $.Values.langfuse.redis.auth.password)
+      (dict "deploy" $.Values.langfuse.s3.deploy         "path" "s3.auth.rootPassword"     "value" $.Values.langfuse.s3.auth.rootPassword) }}
+{{- if and $store.deploy (not $store.value) }}
+{{- fail (printf "langfuse.%s is required while its store is deployed by this chart — an empty value is regenerated on every render" $store.path) }}
+{{- end }}
+{{- end }}
+
+{{- /*
+An external PostgreSQL has no name the chart can infer, unlike the bundled one
+whose Service it derives from the release. Empty here, langfuse builds a
+DATABASE_URL pointing at nothing and the pods fail on connect instead of on
+render.
+
+Only PostgreSQL. The subchart already rejects an unnamed external Redis or
+ClickHouse, and does it better — its message names the cluster and sentinel
+modes that stand in for a host. S3 is unguarded on both sides on purpose:
+against AWS the endpoint is meant to be empty so the SDK resolves it from the
+region, and credentials may come from IRSA rather than from any value a chart
+can see.
+*/}}
+{{- if and (not .Values.langfuse.postgresql.deploy) (not .Values.langfuse.postgresql.host) }}
+{{- fail "langfuse.postgresql.host is required when langfuse.postgresql.deploy is false — name the server Langfuse should connect to" }}
+{{- end }}
+{{- /*
+And the reverse: an explicit host wins over the bundled Service, so deploying
+a server while naming another one renders a StatefulSet nothing connects to.
+*/}}
+{{- if and .Values.langfuse.postgresql.deploy .Values.langfuse.postgresql.host }}
+{{- fail (printf "langfuse.postgresql.deploy renders a PostgreSQL but langfuse.postgresql.host names %q, which the pods would use instead — clear the host to use the bundled server" .Values.langfuse.postgresql.host) }}
+{{- end }}
+
+{{- /*
+The wait-for-postgresql init container names the bundled Service, because a
+subchart value cannot be templated and the container is handed no env to read
+the host from. Left pointing there with the bundled server gone, it waits on a
+name that will never resolve and the pods sit in Init forever — a healthy
+render and a dead release. Caught here instead.
+*/}}
+{{- if and (not .Values.langfuse.postgresql.deploy)
+           (contains "langfuse-postgresql" (toYaml .Values.langfuse.langfuse.extraInitContainers)) }}
+{{- fail "langfuse.langfuse.extraInitContainers still waits on the bundled langfuse-postgresql Service, which langfuse.postgresql.deploy=false does not create — point it at langfuse.postgresql.host or set extraInitContainers to []" }}
+{{- end }}
+
+{{- /*
+The ClickHouse this chart renders and the Langfuse pods reaching it are
+configured from two value trees Helm cannot template across, so user, database
+and Service name are kept equal by hand. Change both or neither — the same rule
+as OpenMetadata's MySQL password below.
+*/}}
+{{- if .Values.clickhouse.deploy }}
+{{- if ne .Values.clickhouse.user .Values.langfuse.clickhouse.auth.username }}
+{{- fail (printf "clickhouse.user (%s) and langfuse.clickhouse.auth.username (%s) address the same server and must match" .Values.clickhouse.user .Values.langfuse.clickhouse.auth.username) }}
+{{- end }}
+{{- if ne .Values.clickhouse.database .Values.langfuse.clickhouse.database }}
+{{- fail (printf "clickhouse.database (%s) and langfuse.clickhouse.database (%s) address the same server and must match" .Values.clickhouse.database .Values.langfuse.clickhouse.database) }}
+{{- end }}
+{{- if .Values.langfuse.clickhouse.deploy }}
+{{- fail "clickhouse.deploy renders this chart's ClickHouse and langfuse.clickhouse.deploy renders the operator's — enable one, not both" }}
+{{- end }}
+{{- if ne .Values.langfuse.clickhouse.host "clickhouse" }}
+{{- fail (printf "langfuse.clickhouse.host is %q but this chart's ClickHouse Service is named clickhouse — set clickhouse.deploy=false to point Langfuse elsewhere" .Values.langfuse.clickhouse.host) }}
+{{- end }}
+{{- end }}
+{{- end }}

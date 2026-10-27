@@ -38,6 +38,7 @@ jobs:
           helm repo add open-metadata https://helm.open-metadata.org
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
           helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo add langfuse https://langfuse.github.io/langfuse-k8s
       - run: helm dependency build charts/test-dependencies
       - run: helm lint charts/test-dependencies -f charts/test-dependencies/values-dev.yaml
       - run: charts/test-dependencies/tests/render-test.sh
@@ -94,6 +95,7 @@ jobs:
           helm repo add open-metadata https://helm.open-metadata.org
           helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
           helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo add langfuse https://langfuse.github.io/langfuse-k8s
       - run: helm dependency build charts/test-dependencies
       - name: Build and load mcp-mock
         # Published only after merge; the PR tests its own source.
