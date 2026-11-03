@@ -231,44 +231,32 @@ check "dev+langfuse: Langfuse connects to the in-chart Service" "http://clickhou
 check "langfuse: no clickhouse-auth Secret by default" "" \
   "$(render "${LF[@]}" -f "$CHART/values-dev.yaml" --set secrets.clickhouseAuth.create=false \
      | yq ea 'select(.kind == "Secret" and .metadata.name == "clickhouse-auth") | .metadata.name')"
-# Each bundled store can be swapped for one that already exists. The password
-# guards must follow the store: required while this chart deploys it, and out
-# of the way once it does not.
-# The default is Naira's PostgreSQL, the server litellm.db also points at.
-check "postgres: no PostgreSQL of its own by default" "0" \
+# The database is always Naira's, the server litellm.db also points at.
+check "postgres: no PostgreSQL of its own" "0" \
   "$(render "${DEVLF[@]}" | yq ea '[select(.metadata.name == "langfuse-postgresql")] | length')"
 check "postgres: Langfuse is pointed at Naira's server" "postgres.idp-system.svc.cluster.local" \
   "$(render "${DEVLF[@]}" | yq "$LFWEB | .env[] | select(.name == \"DATABASE_HOST\") | .value")"
 check "postgres: no langfuse-db Secret by default" "" \
-  "$(render "${LF[@]}" | yq ea 'select(.kind == "Secret" and .metadata.name == "langfuse-db") | .metadata.name')"
+  "$(render "${DEVLF[@]}" --set secrets.langfuseDatabase.create=false \
+     | yq ea 'select(.kind == "Secret" and .metadata.name == "langfuse-db") | .metadata.name')"
 check "dev: the langfuse-db Secret carries both keys litellm-db does" "password,username" \
   "$(render "${DEVLF[@]}" | yq ea 'select(.kind == "Secret" and .metadata.name == "langfuse-db") | .stringData | keys | sort | join(",")')"
 check "postgres: the password comes from langfuse-db" "langfuse-db/password" \
   "$(render "${DEVLF[@]}" | yq "$LFWEB | .env[] | select(.name == \"DATABASE_PASSWORD\") | .valueFrom.secretKeyRef | .name + \"/\" + .key")"
 check "postgres: the init container waits on that same server" "1" \
   "$(render "${DEVLF[@]}" | yq ea "[$LFWEB_POD | .initContainers[] | select(.command[2] | test(\"postgres.idp-system\"))] | length")"
-must_fail "postgres: an external server must be named" "langfuse.postgresql.host is required" \
-  "${DEVLF[@]}" --set langfuse.postgresql.host=
-# A tier without Naira can still render its own server.
-PGOWN=(--set langfuse.postgresql.deploy=true --set langfuse.postgresql.host=
-       --set langfuse.postgresql.auth.password=pg-own --set langfuse.postgresql.auth.existingSecret=)
-check "postgres: deploy=true brings the bundled server back" "langfuse-postgresql" \
-  "$(render "${DEVLF[@]}" "${PGOWN[@]}" | yq ea 'select(.kind == "StatefulSet" and .metadata.name == "langfuse-postgresql") | .metadata.name')"
-must_fail "postgres: the bundled server still needs a password" "langfuse.postgresql.auth.password is required" \
-  "${DEVLF[@]}" --set langfuse.postgresql.deploy=true --set langfuse.postgresql.host= \
-  --set langfuse.postgresql.auth.password= --set langfuse.postgresql.auth.existingSecret=
-# Deploying one server while naming another renders a StatefulSet nothing uses.
 # existingSecret is cleared only so the subchart's own guard, which renders
 # first, does not answer before ours does.
-must_fail "postgres: a bundled server and a named host are exclusive" "which the pods would use instead" \
-  "${DEVLF[@]}" --set langfuse.postgresql.deploy=true --set langfuse.postgresql.auth.password=pg-own \
-  --set langfuse.postgresql.auth.existingSecret=
+must_fail "postgres: Langfuse must not bring its own server" "langfuse.postgresql.deploy must be false" \
+  "${DEVLF[@]}" --set langfuse.postgresql.deploy=true --set langfuse.postgresql.auth.existingSecret=
+must_fail "postgres: the server must be named" "langfuse.postgresql.host is required" \
+  "${DEVLF[@]}" --set langfuse.postgresql.host=
 # The init container names a server literally and cannot be templated, so
 # leaving it on one this release does not create renders a dead install.
-must_fail "postgres: the init container cannot name a server that is gone" "extraInitContainers still waits" \
+must_fail "postgres: the init container cannot name a server that is gone" "waits on langfuse-postgresql" \
   "${DEVLF[@]}" --set-json 'langfuse.langfuse.extraInitContainers=[{"name":"wait","image":"postgres:18","command":["sh","-c","until pg_isready -h langfuse-postgresql; do sleep 2; done"]}]'
-# AWS: endpoint deliberately empty so the SDK resolves it from the region, and
-# no keys at all because the pod authenticates through its role.
+# AWS: the endpoint stays empty so the SDK resolves it, and the pod authenticates
+# through its role rather than any key.
 S3AWS=(--set langfuse.s3.deploy=false --set langfuse.s3.auth.rootPassword=
        --set langfuse.s3.bucket=naira-langfuse --set langfuse.s3.region=eu-central-1
        --set langfuse.s3.forcePathStyle=false)
@@ -293,17 +281,15 @@ check "redis: the connection string carries host, port and database" "redis://de
 # that ever stops being true this fails, which is the point of asserting it.
 must_fail "redis: an external server must be named (by the subchart)" "Redis host must be configured" \
   "${DEVLF[@]}" --set langfuse.redis.deploy=false --set langfuse.redis.host=
-# Storage classes. Empty must mean "omit the field": `storageClassName: ""` is
-# not the cluster default, it switches dynamic provisioning off and leaves the
-# claim Pending, so a render that emits one is a bug rather than a no-op.
-# volumeClaimTemplates are immutable, so anything version-bearing in them
-# rejects every later upgrade — and only on the next version bump.
+# `storageClassName: ""` is not the cluster default — it switches dynamic
+# provisioning off and leaves the claim Pending, so emitting one is a bug.
+# volumeClaimTemplates are immutable, so anything version-bearing in them rejects
+# every later upgrade, and only on the next version bump.
 check "storage: no volumeClaimTemplate carries the chart version" "" \
   "$(render "${DEVLF[@]}" | yq ea '[select(.kind == "StatefulSet") | .spec.volumeClaimTemplates[]? | select(.metadata.labels["helm.sh/chart"] != null) | .metadata.name] | join(",")')"
 check "storage: no storageClassName is emitted when none is configured" "0" \
   "$(render "${DEVLF[@]}" | grep -c storageClassName || true)"
 SC=(--set clickhouse.storageClass=fast-ssd
-    --set langfuse.postgresql.storage.className=pg-class
     --set langfuse.redis.dataStorage.className=redis-class
     --set langfuse.s3.allInOne.data.storageClass=bulk-hdd)
 check "storage: each langfuse volume takes its own class (PVCs)" \
@@ -340,10 +326,6 @@ check "dev+langfuse: the app credentials Secret outlives the release" "keep" \
   "$(render "${DEVLF[@]}" | yq ea 'select(.kind == "Secret" and .metadata.name == "langfuse-app-credentials") | .metadata.annotations["helm.sh/resource-policy"]')"
 must_fail "langfuse app Secret create needs a salt" "secrets.langfuseApp.salt is required" \
   "${DEVLF[@]}" --set secrets.langfuseApp.salt=""
-# Both subcharts default to <release>-postgresql, so a bundled langfuse server
-# would collide with litellm's; fullnameOverride is what keeps them apart.
-check "dev+langfuse: a bundled server is litellm's neighbour, not its twin" "langfuse-postgresql" \
-  "$(render "${DEVLF[@]}" "${PGOWN[@]}" | yq "$LFWEB | .env[] | select(.name == \"DATABASE_HOST\") | .value")"
 check "dev+langfuse: Langfuse does not phone home" "false" \
   "$(render "${DEVLF[@]}" | yq "$LFWEB | .env[] | select(.name == \"TELEMETRY_ENABLED\") | .value")"
 # Everything pinnable is pinned; seaweedfs generates its SFTP credentials with
