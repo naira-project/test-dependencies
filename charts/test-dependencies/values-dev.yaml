@@ -45,10 +45,12 @@ secrets:
   langfuseDatabase:
     create: true
     password: langfuse-local-password
+  # Langfuse's crypto values: salt hashes API keys, encryptionKey encrypts stored
+  # provider credentials, nextauthSecret signs sessions. create: true renders the
+  # Secret here (values.yaml defers to the operator); the zeros are valid and fake.
   langfuseApp:
     create: true
     salt: langfuse-local-dev-salt
-    # 64 hex chars, as Langfuse requires of ENCRYPTION_KEY.
     encryptionKey: "0000000000000000000000000000000000000000000000000000000000000000"
     nextauthSecret: langfuse-local-dev-nextauth
   clickhouseAuth:
@@ -115,9 +117,9 @@ mlflow:
 clickhouse:
   storage: 2Gi
   resources:
-    # 1Gi, not the 512Mi this asked for first: measured at ~1.2Gi idle on kind,
-    # before a single trace is written. An understated request is one the
-    # scheduler believes, and then something else on the node pays for it.
+    # 512Mi, the first guess, was far too low: ClickHouse sits at ~1.2Gi idle on
+    # kind, much of it reclaimable cache. 1Gi is the floor the scheduler packs
+    # against; the limit absorbs the rest.
     requests: {cpu: 200m, memory: 1Gi}
     limits: {memory: 2Gi}
 

@@ -64,13 +64,14 @@ secrets:
     create: false
     accessKey: ""
     secretKey: ""
-  # Secret langfuse-app-credentials, read by secretKeyRef below. Fixed: the
-  # subchart regenerates all three per render, orphaning rows under the old key.
+  # Secret langfuse-app-credentials, passed to the subchart by secretKeyRef
+  # (langfuse.langfuse.*): without that it regenerates these three on every render,
+  # orphaning encrypted provider credentials and invalidating every API key.
   langfuseApp:
     create: false
-    salt: ""            # `openssl rand -base64 32`
-    encryptionKey: ""   # 64 hex chars — `openssl rand -hex 32`
-    nextauthSecret: ""  # `openssl rand -base64 32`
+    salt: ""            # hashes API keys — `openssl rand -base64 32`
+    encryptionKey: ""   # encrypts provider credentials; 64 hex — `openssl rand -hex 32`
+    nextauthSecret: ""  # signs sessions — `openssl rand -base64 32`
   # Secret langfuse-db (keys username, password). Password must equal the naira
   # chart's database.databases.langfuse password. Langfuse reads only password.
   langfuseDatabase:
