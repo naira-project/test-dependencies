@@ -5,6 +5,7 @@ tags:
   litellm: true
   mlflow: true
   mcpMock: true
+  langfuse: false
   openmetadata: false
   monitoring: false
   llamacpp: true
@@ -39,6 +40,22 @@ secrets:
   openmetadataDatabase:
     create: true
     password: openmetadata-local-password
+  # Equals the naira chart's values-dev.yaml database.databases.langfuse
+  # password.
+  langfuseDatabase:
+    create: true
+    password: langfuse-local-password
+  # Langfuse's crypto values: salt hashes API keys, encryptionKey encrypts stored
+  # provider credentials, nextauthSecret signs sessions. create: true renders the
+  # Secret here (values.yaml defers to the operator); the zeros are valid and fake.
+  langfuseApp:
+    create: true
+    salt: langfuse-local-dev-salt
+    encryptionKey: "0000000000000000000000000000000000000000000000000000000000000000"
+    nextauthSecret: langfuse-local-dev-nextauth
+  clickhouseAuth:
+    create: true
+    password: clickhouse-local-dev
 
 litellm:
   # Sample catalog content for the litellm plugins. Replaces values.yaml's list.
@@ -94,6 +111,32 @@ litellm:
 
 mlflow:
   flaskServerSecretKey: local-dev-flask-key   # fixed: generated otherwise on every render
+
+# Both render only with tags.langfuse: the passwords validate.yaml requires,
+# and volumes a kind node can actually provision.
+clickhouse:
+  storage: 2Gi
+  resources:
+    # 512Mi, the first guess, was far too low: ClickHouse sits at ~1.2Gi idle on
+    # kind, much of it reclaimable cache. 1Gi is the floor the scheduler packs
+    # against; the limit absorbs the rest.
+    requests: {cpu: 200m, memory: 1Gi}
+    limits: {memory: 2Gi}
+
+langfuse:
+  # No postgresql block: Langfuse uses its database on Naira's server, like
+  # litellm. Install naira first.
+  redis:
+    auth:
+      password: langfuse-local-valkey
+    dataStorage:
+      requestedSize: 1Gi
+  s3:
+    auth:
+      rootPassword: langfuse-local-s3
+    allInOne:
+      data:
+        size: 2Gi
 
 seed:
   mlflow:
