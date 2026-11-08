@@ -114,7 +114,9 @@ about 4 CPUs and 8 GiB.
    kubectl -n idp-system port-forward svc/ui 3001:80 &
    ```
 
-   Portal at <http://localhost:3000>, user `testuser`, password `testpass`.
+   Portal at <http://naira.localhost:3000>, user `testuser`, password `testpass`.
+   The realm also allows <http://localhost:3000>, but Naira's wikis open only
+   when the portal is on `naira.localhost`.
 
 Every credential in `values-dev.yaml`, `ci/`, `files/naira-realm.json` and
 the commands above is a local development placeholder.
