@@ -255,32 +255,8 @@ must_fail "postgres: the server must be named" "langfuse.postgresql.host is requ
 # leaving it on one this release does not create renders a dead install.
 must_fail "postgres: the init container cannot name a server that is gone" "waits on langfuse-postgresql" \
   "${DEVLF[@]}" --set-json 'langfuse.langfuse.extraInitContainers=[{"name":"wait","image":"postgres:18","command":["sh","-c","until pg_isready -h langfuse-postgresql; do sleep 2; done"]}]'
-# AWS: the endpoint stays empty so the SDK resolves it, and the pod authenticates
-# through its role rather than any key.
-S3AWS=(--set langfuse.s3.deploy=false --set langfuse.s3.auth.rootPassword=
-       --set langfuse.s3.bucket=naira-langfuse --set langfuse.s3.region=eu-central-1
-       --set langfuse.s3.forcePathStyle=false)
-check "s3: deploy=false renders no SeaweedFS of its own" "0" \
-  "$(render "${DEVLF[@]}" "${S3AWS[@]}" | yq ea '[select(.metadata.name == "langfuse-s3-all-in-one")] | length')"
-check "s3: AWS bucket, region and path style reach the pods" "naira-langfuse,eu-central-1,false" \
-  "$(render "${DEVLF[@]}" "${S3AWS[@]}" | yq ea "[$LFWEB | .env[] | select(.name | test(\"S3_EVENT_UPLOAD_(BUCKET|REGION|FORCE_PATH_STYLE)\$\")) | .value] | join(\",\")")"
-check "s3: no endpoint is set for AWS, so the SDK resolves one" "0" \
-  "$(render "${DEVLF[@]}" "${S3AWS[@]}" | yq ea "[$LFWEB | .env[] | select(.name == \"LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT\")] | length")"
-check "s3: an S3-compatible endpoint takes credentials by reference" "http://minio.storage.svc:9000,langfuse-s3/access-key-id" \
-  "$(render "${DEVLF[@]}" "${S3AWS[@]}" --set langfuse.s3.endpoint=http://minio.storage.svc:9000 \
-       --set langfuse.s3.accessKeyId.secretKeyRef.name=langfuse-s3 --set langfuse.s3.accessKeyId.secretKeyRef.key=access-key-id \
-     | yq ea "[$LFWEB | .env[] | select(.name == \"LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT\") | .value, $LFWEB | .env[] | select(.name == \"LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID\") | .valueFrom.secretKeyRef | .name + \"/\" + .key] | join(\",\")")"
-REDISEXT=(--set langfuse.redis.deploy=false --set langfuse.redis.host=redis.example.internal
-          --set langfuse.redis.auth.password= --set langfuse.redis.auth.existingSecret=langfuse-redis
-          --set langfuse.redis.auth.existingSecretPasswordKey=password)
-check "redis: deploy=false renders no Valkey of its own" "0" \
-  "$(render "${DEVLF[@]}" "${REDISEXT[@]}" | yq ea '[select(.metadata.name == "langfuse-valkey")] | length')"
-check "redis: the connection string carries host, port and database" "redis://default:\$(REDIS_PASSWORD)@redis.example.internal:6379/0" \
-  "$(render "${DEVLF[@]}" "${REDISEXT[@]}" | yq ea "[$LFWEB | .env[] | select(.name == \"REDIS_CONNECTION_STRING\") | .value] | join(\"\")")"
-# Upstream rejects an unnamed external Redis, so validate.yaml does not. If
-# that ever stops being true this fails, which is the point of asserting it.
-must_fail "redis: an external server must be named (by the subchart)" "Redis host must be configured" \
-  "${DEVLF[@]}" --set langfuse.redis.deploy=false --set langfuse.redis.host=
+check "redis: the connection string names the bundled Valkey, with port and database" "redis://default:\$(REDIS_PASSWORD)@langfuse-valkey:6379/0" \
+  "$(render "${DEVLF[@]}" | yq ea "[$LFWEB | .env[] | select(.name == \"REDIS_CONNECTION_STRING\") | .value] | join(\"\")")"
 # `storageClassName: ""` is not the cluster default — it switches dynamic
 # provisioning off and leaves the claim Pending, so emitting one is a bug.
 # volumeClaimTemplates are immutable, so anything version-bearing in them rejects

@@ -282,21 +282,16 @@ langfuse:
       existingSecret: langfuse-db
       secretKeys: {userPasswordKey: password}
   redis:
-    # Valkey, bundled — Langfuse's queue, not a cache. false points at an existing
-    # server, and is also what the subchart's cluster and sentinel modes require.
+    # Valkey, bundled — Langfuse's queue, not a cache. Always ours: there is no
+    # external-Redis path, so deploy stays true.
     deploy: true
-    host: ""                # required when deploy: false (validate.yaml)
     port: 6379
     fullnameOverride: langfuse-valkey
-    tls: {enabled: false}   # for a managed instance; caPath, certPath and keyPath sit alongside
     auth:
       username: default
       database: 0
       # Generated when left empty; validate.yaml rejects that while the store is ours.
       password: ""
-      # The deploy: false half, as for PostgreSQL above.
-      existingSecret: ""
-      existingSecretPasswordKey: ""
     # Upstream pins `maxmemory-policy noeviction` and rejects anything else — the
     # job queue lives in this store, so eviction loses work.
     dataStorage: {requestedSize: 2Gi, className: ""}
@@ -304,19 +299,13 @@ langfuse:
       requests: {cpu: 50m, memory: 128Mi}
       limits: {memory: 256Mi}
   s3:
-    # true renders the bundled SeaweedFS below; false points Langfuse at an
-    # external S3. Nothing below is required: AWS wants an empty endpoint, path
-    # style off and an IRSA role rather than keys; MinIO and Ceph the opposite.
+    # SeaweedFS, bundled — Langfuse's blob store. Always ours: there is no
+    # external-S3 path, so deploy stays true.
     deploy: true
-    storageProvider: s3     # or azure, gcs
+    storageProvider: s3
     bucket: langfuse
     region: auto
-    endpoint: ""            # empty on AWS; the server's URL otherwise
-    forcePathStyle: true    # false for AWS
-    # By reference, never by value: upstream's `value:` lands in the Deployment.
-    accessKeyId: {secretKeyRef: {name: "", key: ""}}
-    secretAccessKey: {secretKeyRef: {name: "", key: ""}}
-    # eventUpload, batchExport and mediaUpload each override all of the above.
+    forcePathStyle: true    # SeaweedFS addresses buckets by path, not subdomain
     fullnameOverride: langfuse-s3
     auth: {rootPassword: ""}
     # seaweedfs renders an SFTP Secret whenever allInOne is on and generates its
