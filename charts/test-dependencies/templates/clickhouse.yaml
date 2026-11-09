@@ -1,0 +1,95 @@
+{{/*
+ClickHouse — where Langfuse keeps traces, and the one store its chart does not
+bring along: 2.x builds it from ClickHouseCluster and KeeperCluster CRs, which
+would make the ClickHouse operator and cert-manager prerequisites of this chart.
+A single server needs none of what the operator adds. Rides tags.langfuse — a
+ClickHouse with no Langfuse in front of it is an empty server.
+*/}}
+{{- if and .Values.tags.langfuse .Values.clickhouse.deploy }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "deps.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {app: clickhouse}
+  ports:
+    - {name: http, port: 8123, targetPort: http}
+    - {name: native, port: 9000, targetPort: native}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: clickhouse
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "deps.labels" . | nindent 4 }}
+spec:
+  serviceName: clickhouse
+  replicas: 1
+  selector:
+    matchLabels: {app: clickhouse}
+  template:
+    metadata:
+      labels:
+        app: clickhouse
+        {{- include "deps.labels" . | nindent 8 }}
+    spec:
+      securityContext:
+        # The image runs as any uid, but will not chown the volume unprivileged,
+        # so fsGroup hands the PVC over: a CSI-provisioned one is root-owned.
+        runAsUser: {{ .Values.clickhouse.uid }}
+        runAsGroup: {{ .Values.clickhouse.uid }}
+        fsGroup: {{ .Values.clickhouse.uid }}
+      terminationGracePeriodSeconds: 120   # a database gets longer than 30s to flush and close
+      containers:
+        - name: clickhouse
+          image: {{ .Values.clickhouse.image | quote }}
+          env:
+            # With a password set the entrypoint makes `default` reachable from
+            # the pod network; without one it answers on localhost only.
+            - name: CLICKHOUSE_USER
+              value: {{ .Values.clickhouse.user | quote }}
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom: {secretKeyRef: {name: clickhouse-auth, key: password}}
+            - name: CLICKHOUSE_DB
+              value: {{ .Values.clickhouse.database | quote }}
+          # No readOnlyRootFilesystem: the entrypoint rewrites users.d on every start.
+          securityContext: {{- include "deps.securityContext" . | nindent 12 }}
+          ports:
+            - {containerPort: 8123, name: http}
+            - {containerPort: 9000, name: native}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/clickhouse}
+          # Slow while the server replays its log; the other two wait on it, so they stay tight.
+          startupProbe:
+            httpGet: {path: /ping, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /ping, port: http}
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: {path: /ping, port: http}
+            periodSeconds: 20
+            failureThreshold: 5
+          resources: {{- toYaml .Values.clickhouse.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        # stableLabels: this block is immutable, and deps.labels would carry
+        # the chart version into it — a version bump then fails the upgrade.
+        labels: {{- include "deps.stableLabels" . | nindent 10 }}
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- /* Omitted when empty, never written as "": that turns dynamic
+        provisioning off and leaves the claim Pending. */}}
+        {{- with .Values.clickhouse.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.clickhouse.storage }}
+{{- end }}
