@@ -72,6 +72,14 @@ secrets:
     salt: ""            # hashes API keys — `openssl rand -base64 32`
     encryptionKey: ""   # encrypts provider credentials; 64 hex — `openssl rand -hex 32`
     nextauthSecret: ""  # signs sessions — `openssl rand -base64 32`
+  # Secret langfuse-init, read by langfuse.langfuse.additionalEnv and the seed Job.
+  # LANGFUSE_INIT_* applies once, at first start: changing these later leaves the
+  # stored project keys as they were, so reset the database instead.
+  langfuseInit:
+    create: false
+    publicKey: ""     # pk-lf-...
+    secretKey: ""     # sk-lf-...
+    userPassword: ""  # sign-in password for LANGFUSE_INIT_USER_EMAIL
   # Secret langfuse-db (keys username, password). Password must equal the naira
   # chart's database.databases.langfuse password. Langfuse reads only password.
   langfuseDatabase:
@@ -209,6 +217,26 @@ seed:
     enabled: false
     image: python:3.13-slim
     requests: requests==2.32.3   # installed by the Job at start
+  langfuse:
+    enabled: false
+    image: python:3.13-slim
+    requests: requests==2.32.3   # installed by the Job at start
+    # One entry per demo application. `traceName` must match a demoApps entry and
+    # the langfuse plugin config's observes[].trace_name. Every entry writes to
+    # the one project LANGFUSE_INIT_* provisions, and the plugin holds `window`
+    # and `score_name` per project, so `windowHours` and `scoreName` must agree
+    # across entries — otherwise a tile aggregates the wrong span or stays empty.
+    apps:
+      - traceName: triage-agent
+        windowHours: 24
+        traces: 120
+        scoreName: user_feedback
+        scoreValues: [0, 1]   # thumbs up/down; the mean is the positive share
+      - traceName: escalation-agent
+        windowHours: 24
+        traces: 200
+        scoreName: user_feedback
+        scoreValues: [0, 1]
   resources:
     requests: {cpu: 50m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
@@ -242,7 +270,10 @@ langfuse:
     salt: {secretKeyRef: {name: langfuse-app-credentials, key: salt}}
     encryptionKey: {secretKeyRef: {name: langfuse-app-credentials, key: encryption-key}}
     nextauth:
-      url: http://localhost:3002   # browser-facing; reached via port-forward
+      # Browser-facing, reached via port-forward. 3000-3002 are Naira's portal,
+      # its UI and Grafana, so Langfuse takes 3003; the naira Tiltfile forwards
+      # it there and the plugin's ui_host must agree.
+      url: http://localhost:3003
       secret: {secretKeyRef: {name: langfuse-app-credentials, key: nextauth-secret}}
     features: {telemetryEnabled: false}   # a test tier does not report usage to langfuse.com
     image: {pullPolicy: IfNotPresent}     # the tag is already pinned to appVersion
@@ -257,6 +288,23 @@ langfuse:
         resources:
           requests: {cpu: 10m, memory: 32Mi}
           limits: {memory: 64Mi}
+    # Headless init: creates the org, project, key pair and sign-in user at first
+    # start, else they must be clicked together in the UI and the plugin config
+    # edited to match. PROJECT_ID appears in Langfuse's URLs, so the plugin uses
+    # it as project_id for deep links.
+    additionalEnv:
+      - {name: LANGFUSE_INIT_ORG_ID, value: naira-dev}
+      - {name: LANGFUSE_INIT_ORG_NAME, value: Naira Dev}
+      - {name: LANGFUSE_INIT_PROJECT_ID, value: naira-demo}
+      - {name: LANGFUSE_INIT_PROJECT_NAME, value: Naira Demo}
+      - name: LANGFUSE_INIT_PROJECT_PUBLIC_KEY
+        valueFrom: {secretKeyRef: {name: langfuse-init, key: public-key}}
+      - name: LANGFUSE_INIT_PROJECT_SECRET_KEY
+        valueFrom: {secretKeyRef: {name: langfuse-init, key: secret-key}}
+      - {name: LANGFUSE_INIT_USER_EMAIL, value: dev@naira.local}
+      - {name: LANGFUSE_INIT_USER_NAME, value: Naira Dev}
+      - name: LANGFUSE_INIT_USER_PASSWORD
+        valueFrom: {secretKeyRef: {name: langfuse-init, key: user-password}}
     web:
       livenessProbe: {failureThreshold: 30}
       resources:
@@ -327,6 +375,21 @@ langfuse:
     auth: {existingSecret: clickhouse-auth, existingSecretKey: password}
     # One server, no Keeper: Langfuse migrates without ON CLUSTER DDL.
     cluster: {enabled: false}
+
+# Stand-in LLM applications: Deployments for the catalog's depl-calls-svc plugin
+# to pick up, so the langfuse plugin has real nodes to attach metrics to.
+demoApps:
+  enabled: false
+  # Unprivileged: deps.securityContext sets runAsNonRoot, which stock nginx cannot satisfy.
+  image: nginxinc/nginx-unprivileged:1.29-alpine
+  port: 8080
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {cpu: 100m, memory: 64Mi}
+  # One Deployment per entry; `name` is both the Deployment and the trace name.
+  apps:
+    - name: triage-agent
+    - name: escalation-agent
 
 # Airflow off: the plugin only reads the REST API, and it needs ReadWriteMany.
 # MySQL off: OpenMetadata uses its own database on Naira's PostgreSQL.

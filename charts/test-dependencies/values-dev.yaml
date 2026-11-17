@@ -53,6 +53,14 @@ secrets:
     salt: langfuse-local-dev-salt
     encryptionKey: "0000000000000000000000000000000000000000000000000000000000000000"
     nextauthSecret: langfuse-local-dev-nextauth
+  # Fixed local-dev keys, committed deliberately: the langfuse plugin's config must
+  # name the same pair, and none of this is reachable from outside kind. Applied
+  # once, at Langfuse's first start — see values.yaml.
+  langfuseInit:
+    create: true
+    publicKey: pk-lf-naira-dev
+    secretKey: sk-lf-naira-dev
+    userPassword: naira-dev-password   # sign in as dev@naira.local
   clickhouseAuth:
     create: true
     password: clickhouse-local-dev
@@ -143,6 +151,12 @@ seed:
     enabled: true
   openmetadata:
     enabled: true   # renders only with tags.openmetadata
+  langfuse:
+    enabled: true   # renders only with tags.langfuse
+
+# Independent of tags.langfuse: depl-calls-svc catalogues them either way.
+demoApps:
+  enabled: true
 
 openmetadata-dependencies:
   opensearch:
