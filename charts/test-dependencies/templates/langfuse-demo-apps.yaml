@@ -1,0 +1,40 @@
+{{- if .Values.demoApps.enabled }}
+{{- range $app := .Values.demoApps.apps }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $app.name }}
+  namespace: {{ $.Release.Namespace }}
+  labels: {{- include "deps.labels" $ | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: {{ $app.name }}}
+  template:
+    metadata:
+      labels:
+        app: {{ $app.name }}
+        {{- include "deps.labels" $ | nindent 8 }}
+    spec:
+      containers:
+        - name: app
+          image: {{ $.Values.demoApps.image | quote }}
+          ports:
+            - {containerPort: {{ $.Values.demoApps.port }}, name: http}
+          readinessProbe:
+            httpGet: {path: /, port: http}
+            periodSeconds: 10
+          resources: {{- toYaml ($app.resources | default $.Values.demoApps.resources) | nindent 12 }}
+          securityContext:
+            {{- include "deps.securityContext" $ | nindent 12 }}
+            readOnlyRootFilesystem: true
+          # nginx-unprivileged writes its temp and cache paths at startup.
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: cache, mountPath: /var/cache/nginx}
+      volumes:
+        - {name: tmp, emptyDir: {}}
+        - {name: cache, emptyDir: {}}
+---
+{{- end }}
+{{- end }}

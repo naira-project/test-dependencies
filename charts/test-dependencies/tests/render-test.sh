@@ -348,6 +348,39 @@ check "dev+openmetadata: openmetadata seed Job" "yes" \
   "$(seeds "${DEV[@]}" "${OM[@]}" | grep -qE '^seed-mlflow-[0-9a-f]{8},seed-openmetadata-[0-9a-f]{8}$' && echo yes || echo no)"
 check "seed: none for a component that is off" "" \
   "$(render "${DEV[@]}" --set tags.mlflow=false | yq ea 'select(.kind == "Job" and (.metadata.name | test("^seed-"))) | .metadata.name')"
+check "dev+langfuse: langfuse seed Job, named by hash" "yes" \
+  "$(seeds "${DEVLF[@]}" | grep -qE '(^|,)seed-langfuse-[0-9a-f]{8}(,|$)' && echo yes || echo no)"
+check "seed: langfuse script is mounted" "yes" \
+  "$(render "${DEVLF[@]}" | yq ea 'select(.kind == "ConfigMap" and .metadata.name == "seed-langfuse") | .data["seed.py"]' | grep -q 'langfuse.observation.type' && echo yes || echo no)"
+# Seeder and Langfuse must read one Secret: a second copy of the pair would diverge.
+LFSEED='select(.kind == "Job" and (.metadata.name | test("^seed-langfuse-"))) | .spec.template.spec.containers[0]'
+check "seed: langfuse reaches the web Service" "http://langfuse-web:3000" \
+  "$(render "${DEVLF[@]}" | yq "$LFSEED | .env[] | select(.name == \"LANGFUSE_HOST\") | .value")"
+check "seed: the seeder reads the key pair Langfuse is initialised with" "langfuse-init/public-key" \
+  "$(render "${DEVLF[@]}" | yq "$LFSEED | .env[] | select(.name == \"LANGFUSE_PUBLIC_KEY\") | .valueFrom.secretKeyRef | .name + \"/\" + .key")"
+check "dev+langfuse: Langfuse is initialised from that same Secret" "langfuse-init/public-key" \
+  "$(render "${DEVLF[@]}" | yq "$LFWEB | .env[] | select(.name == \"LANGFUSE_INIT_PROJECT_PUBLIC_KEY\") | .valueFrom.secretKeyRef | .name + \"/\" + .key")"
+check "langfuse: no langfuse-init Secret by default" "" \
+  "$(render "${DEVLF[@]}" --set secrets.langfuseInit.create=false \
+     | yq ea 'select(.kind == "Secret" and .metadata.name == "langfuse-init") | .metadata.name')"
+must_fail "langfuse: the init key pair is required" "secrets.langfuseInit.publicKey is required" \
+  "${DEVLF[@]}" --set secrets.langfuseInit.publicKey=
+
+# demo apps: the nodes the langfuse plugin binds its metrics to.
+DEMO='[select(.kind == "Deployment" and (.metadata.name | test("^(triage|escalation)-agent$")))'
+check "demoApps off by default" "" \
+  "$(render | yq ea "$DEMO | .metadata.name] | join(\",\")")"
+check "dev: one Deployment per demo app" "escalation-agent,triage-agent" \
+  "$(render "${DEV[@]}" | yq ea "$DEMO | .metadata.name] | sort | join(\",\")")"
+# deps.securityContext sets runAsNonRoot, which stock nginx cannot satisfy.
+check "demo apps run as non-root" "app:true,app:true" \
+  "$(render "${DEV[@]}" | yq ea "$DEMO | .spec.template.spec.containers[] | .name + \":\" + (.securityContext.runAsNonRoot | tostring)] | sort | join(\",\")")"
+check "seed: every seeded trace name has a demo app" "yes" \
+  "$([ "$(yq '[.seed.langfuse.apps[].traceName] | sort | join(",")' "$CHART/values.yaml")" \
+      = "$(yq '[.demoApps.apps[].name] | sort | join(",")' "$CHART/values.yaml")" ] && echo yes || echo no)"
+# One window and one score name per project in the plugin, and all apps share one.
+check "seed: one window and one score name across the seeded apps" "1,1" \
+  "$(yq '[.seed.langfuse.apps[].windowHours] | unique | length' "$CHART/values.yaml"),$(yq '[.seed.langfuse.apps[].scoreName] | unique | length' "$CHART/values.yaml")"
 
 # securityContext on the pods this chart defines (llama.cpp and vLLM excepted)
 check "own pods run as non-root" "keycloak:true,mcp-mock:true,seed:true,seed:true" \
