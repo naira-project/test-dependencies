@@ -153,6 +153,14 @@ check "vllm: --enforce-eager skips the torch.compile warm-up" "true" \
   "$(render --set tags.vllm=true | yq "$VLLM | .args | contains([\"--enforce-eager\"])")"
 check "vllm: enforceEager is a switch" "false" \
   "$(render --set tags.vllm=true --set vllm.enforceEager=false | yq "$VLLM | .args | contains([\"--enforce-eager\"])")"
+check "vllm: declared serving args" "--max-model-len,2048,--dtype,bfloat16,--max-num-seqs,8" \
+  "$(render --set tags.vllm=true | yq "$VLLM | .args[5:11] | join(\",\")")"
+check "vllm: serving args are values" "4096,float16,32" \
+  "$(render --set tags.vllm=true --set vllm.maxModelLen=4096 --set vllm.dtype=float16 --set vllm.maxNumSeqs=32 | yq "$VLLM | .args | (.[6:7] + .[8:9] + .[10:11]) | join(\",\")")"
+check "vllm: no --quantization by default" "false" \
+  "$(render --set tags.vllm=true | yq "$VLLM | .args | contains([\"--quantization\"])")"
+check "vllm: quantization is opt-in" "int8" \
+  "$(render --set tags.vllm=true --set vllm.quantization=int8 | yq "$VLLM | .args[12]")"
 check "vllm: maxSurge 0, so a rollout never runs two vLLM pods" "0" \
   "$(render --set tags.vllm=true | yq 'select(.kind == "Deployment" and .metadata.name == "vllm") | .spec.strategy.rollingUpdate.maxSurge')"
 check "vllm: startup probe gates liveness for a 10-minute start" "600" \
@@ -165,6 +173,13 @@ check "inference ServiceMonitor follows monitoring + a backend" "inference" \
   "$(render --set tags.monitoring=true --set tags.llamacpp=true | yq ea 'select(.kind == "ServiceMonitor" and .metadata.name == "inference") | .metadata.name')"
 check "inference ServiceMonitor also for vllm" "inference" \
   "$(render --set tags.monitoring=true --set tags.vllm=true | yq ea 'select(.kind == "ServiceMonitor" and .metadata.name == "inference") | .metadata.name')"
+INFMON='select(.kind == "ServiceMonitor" and .metadata.name == "inference") | .spec.endpoints[0].relabelings'
+check "inference series get cluster, namespace and pod labels" "cluster,namespace,pod" \
+  "$(render --set tags.monitoring=true --set tags.vllm=true | yq ea "$INFMON | [.[].targetLabel] | sort | join(\",\")")"
+check "inference cluster label follows clusterName" "kind-1" \
+  "$(render --set tags.monitoring=true --set tags.vllm=true --set clusterName=kind-1 | yq ea "$INFMON | .[] | select(.targetLabel == \"cluster\") | .replacement")"
+check "kube-state-metrics on (Pod UID join)" "true" \
+  "$(helm show values "$CHART" | yq '.["kube-prometheus-stack"].kubeStateMetrics.enabled')"
 check "no inference ServiceMonitor without a backend" "" \
   "$(render --set tags.monitoring=true | yq ea 'select(.kind == "ServiceMonitor" and .metadata.name == "inference") | .metadata.name')"
 check "no inference ServiceMonitor without monitoring" "" \

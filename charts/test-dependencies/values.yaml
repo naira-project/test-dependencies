@@ -365,7 +365,18 @@ openmetadata:
           auth:
             enabled: false
 
+# Value of the `cluster` label on inference metrics (see the inference ServiceMonitor).
+clusterName: test-dependencies
+
 kube-prometheus-stack:
+  # Keep in step with clusterName. External labels only reach remote write,
+  # federation and alerts; local series get `cluster` from the ServiceMonitor.
+  prometheus:
+    prometheusSpec:
+      externalLabels: {cluster: test-dependencies}
+  # kube_pod_info (with its `uid` label) is the Pod UID join target.
+  kubeStateMetrics:
+    enabled: true
   grafana:
     adminPassword: grafana-local-admin
     additionalDataSources:
@@ -403,6 +414,14 @@ vllm:
   servedModelName: opt-125m
   kvCacheSpace: "1"   # GiB of CPU KV cache
   enforceEager: true  # skips the torch.compile warm-up, too slow on 1 CPU
+  # Declared serving settings (rendered as explicit args)
+  maxModelLen: 2048   # --max-model-len; opt-125m has 2048 positions
+  dtype: bfloat16     # --dtype; CPU has no usable fp16 path
+  maxNumSeqs: 8       # --max-num-seqs; concurrent sequences before requests queue
+  quantization: ""    # --quantization (e.g. "int8"); empty = off. Check the CPU image supports it.
+  extraArgs: []       # appended verbatim, e.g. ["--api-key", "..."]
+  # Memory budget: on CPU it is kvCacheSpace above plus resources.limits.memory below
+  # (--gpu-memory-utilization does not apply).
   resources:
     requests: {cpu: 1000m, memory: 4Gi}   # measured: ~1 CPU, 3.1 GiB while starting
     limits: {cpu: 1000m, memory: 6Gi}
