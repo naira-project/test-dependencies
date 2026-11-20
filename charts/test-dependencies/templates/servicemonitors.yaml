@@ -44,6 +44,13 @@ spec:
       path: /metrics
       interval: 15s
       scrapeTimeout: 10s
+      # Every inference series carries cluster, namespace and pod, so it joins
+      # kube_pod_info (kube-state-metrics) on the Pod. The operator adds
+      # namespace and pod itself; declared here so that no longer depends on it.
+      relabelings:
+        - {sourceLabels: [__meta_kubernetes_namespace], targetLabel: namespace}
+        - {sourceLabels: [__meta_kubernetes_pod_name], targetLabel: pod}
+        - {targetLabel: cluster, replacement: {{ .Values.clusterName | quote }}}
 {{- end }}
 {{- if and .Values.tags.monitoring .Values.tags.yace }}
 ---

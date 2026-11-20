@@ -55,6 +55,19 @@ spec:
             - {{ .Values.vllm.servedModelName | quote }}
             - --chat-template
             - /etc/vllm/chat-template.jinja
+            - --max-model-len
+            - {{ .Values.vllm.maxModelLen | quote }}
+            - --dtype
+            - {{ .Values.vllm.dtype | quote }}
+            - --max-num-seqs
+            - {{ .Values.vllm.maxNumSeqs | quote }}
+            {{- with .Values.vllm.quantization }}
+            - --quantization
+            - {{ . | quote }}
+            {{- end }}
+            {{- range .Values.vllm.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
             {{- if .Values.vllm.enforceEager }}
             - --enforce-eager
             {{- end }}
